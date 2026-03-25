@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+artifacts/
+cache/
+typechain-types/
+
+# Environment (contains private keys!)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+coverage.json
+
+# Private/Academic files (not for public repo)
+propuestas/
+emails/
+referencias/
+notas.md
+tesis.tex
+tesis.pdf
+ejemplos/
+poc/
+/scripts/
+
+# Misc
+*.tgz
