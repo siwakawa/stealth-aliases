@@ -12,5 +12,9 @@ export {
 } from "./StealthAddress";
 export type { StealthMetaAddress, StealthKeyPair } from "./StealthAddress";
 
+// Integración con Railgun
+export { RailgunService } from "./railgun/RailgunService";
+export type { RailgunConfig } from "./railgun/RailgunService";
+
 // Re-export de ethers para conveniencia
 export { ethers } from "ethers";

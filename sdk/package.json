@@ -7,15 +7,21 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "demo": "ts-node src/examples/demo.ts",
+    "demo:railgun": "ts-node src/examples/railgun-demo.ts",
     "test": "ts-node src/examples/demo.ts"
   },
   "dependencies": {
-    "ethers": "^6.9.0"
+    "@railgun-community/shared-models": "^7.6.1",
+    "@railgun-community/wallet": "^10.4.0",
+    "ethers": "^6.9.0",
+    "leveldown": "^6.1.1",
+    "snarkjs": "^0.7.6"
   },
   "devDependencies": {
-    "typescript": "^5.3.0",
-    "ts-node": "^10.9.0",
     "@types/node": "^20.10.0",
-    "dotenv": "^16.3.0"
+    "dotenv": "^16.3.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
   }
 }
