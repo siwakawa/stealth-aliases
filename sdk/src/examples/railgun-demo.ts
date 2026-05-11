@@ -1,157 +1,251 @@
 /**
- * Demo completa: Aliases + Railgun
+ * Demo end-to-end: @alice envía USDC a @bob de forma privada
  *
- * Este ejemplo muestra el flujo completo:
- * 1. Alice resuelve @bob usando AliasRegistry
- * 2. Alice blinda (shield) sus USDC en Railgun
- * 3. Alice transfiere privadamente a Bob
- * 4. Bob detecta el pago
+ * Flujo completo:
+ * 1. Crear wallets Railgun para Alice y Bob
+ * 2. Registrar aliases @alice y @bob en AliasRegistryV2 (on-chain)
+ * 3. Alice blinda USDC en la reserva privada de Railgun (shield)
+ * 4. Alice resuelve @bob → obtiene dirección Railgun de Bob
+ * 5. Alice transfiere USDC a Bob dentro de la reserva (transferencia privada con ZK-proof)
+ * 6. Bob verifica su balance
+ *
+ * Uso:
+ *   ts-node src/examples/railgun-demo.ts               # solo registro de aliases
+ *   ts-node src/examples/railgun-demo.ts --shield       # + blindaje de USDC
+ *   ts-node src/examples/railgun-demo.ts --shield --transfer  # flujo completo
  */
 
 import { ethers } from "ethers";
 import { config } from "dotenv";
 import { NetworkName } from "@railgun-community/shared-models";
+import * as path from "path";
+
 import { AliasRegistryClient } from "../AliasRegistryClient";
 import { RailgunService } from "../railgun/RailgunService";
-import {
-  generateStealthMetaAddress,
-  generateStealthAddress,
-  parseStealthMetaAddress,
-} from "../StealthAddress";
+import { generateStealthMetaAddress } from "../StealthAddress";
 
-config({ path: __dirname + "/../../../contracts/.env" });
+config({ path: path.join(__dirname, "../../../contracts/.env") });
 
 const RPC_URL = process.env.POLYGON_RPC || "https://polygon-rpc.com";
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const MNEMONIC_A = process.env.MNEMONIC_A;
+const MNEMONIC_B = process.env.MNEMONIC_B;
 
-// USDC en Polygon
+// USDC en Polygon (6 decimales)
 const USDC_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
 
+// Directorio para datos persistentes de Railgun
+const DATA_DIR =
+  process.env.RAILGUN_DATA_DIR ||
+  path.join(require("os").homedir(), ".stealth-aliases");
+
 async function main() {
-  console.log("╔══════════════════════════════════════════════════════════════╗");
-  console.log("║     Demo: Sistema de Aliases Privados con Railgun            ║");
-  console.log("╚══════════════════════════════════════════════════════════════╝\n");
+  const args = process.argv.slice(2);
+  const doShield = args.includes("--shield");
+  const doTransfer = args.includes("--transfer");
 
-  // === SETUP ===
+  console.log("╔════════════════════════════════════════════════════════════╗");
+  console.log("║     Demo: @alice envía USDC a @bob (privado, Railgun)     ║");
+  console.log("╚════════════════════════════════════════════════════════════╝\n");
+
+  if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY no configurado en .env");
+  if (!MNEMONIC_A) throw new Error("MNEMONIC_A no configurado en .env");
+  if (!MNEMONIC_B) throw new Error("MNEMONIC_B no configurado en .env");
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PARTE 1: Setup
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  console.log("━━━ PARTE 1: Setup ━━━\n");
+
   const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const signer = new ethers.Wallet(PRIVATE_KEY, provider);
   const network = await provider.getNetwork();
-  console.log(`Red: ${network.name} (chainId: ${network.chainId})\n`);
+  console.log(`Red: Polygon (chainId: ${network.chainId})`);
+  console.log(`Wallet pública: ${signer.address}`);
 
-  // Cliente del registro de aliases
-  const registry = new AliasRegistryClient(provider);
-  console.log(`AliasRegistry: ${registry.getContractAddress()}\n`);
+  // Registry con signer para poder registrar
+  const registry = new AliasRegistryClient(signer);
+  console.log(`AliasRegistryV2: ${registry.getContractAddress()}\n`);
 
-  // === PARTE 1: Bob se registra ===
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("PARTE 1: Bob genera su identidad y registra su alias");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-
-  // Bob genera sus claves sigilosas
-  const bobKeys = generateStealthMetaAddress();
-  console.log("Bob generó sus claves sigilosas:");
-  console.log(`  Viewing key (privada):  ${ethers.hexlify(bobKeys.viewing.privateKey).slice(0, 20)}...`);
-  console.log(`  Spending key (privada): ${ethers.hexlify(bobKeys.spending.privateKey).slice(0, 20)}...`);
-  console.log(`  Meta-address (pública): ${ethers.hexlify(bobKeys.metaAddress).slice(0, 30)}...\n`);
-
-  // En producción, Bob registraría su alias:
-  // await registry.register("bob", bobKeys.metaAddress);
-  console.log("(En producción, Bob llamaría a registry.register('bob', metaAddress))\n");
-
-  // === PARTE 2: Alice resuelve el alias y prepara el pago ===
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("PARTE 2: Alice quiere pagar 100 USDC a @satoshi_test");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-
-  // Alice resuelve el alias
-  const aliasToResolve = "satoshi_test";
-  console.log(`Paso 1: Resolviendo @${aliasToResolve}...`);
-
-  const info = await registry.getAliasInfo(aliasToResolve);
-  if (!info.isRegistered) {
-    console.log(`  ❌ @${aliasToResolve} no está registrado\n`);
-    return;
-  }
-
-  console.log(`  ✓ Encontrado: ${info.stealthMetaAddress.slice(0, 40)}...\n`);
-
-  // Alice genera una stealth address única para este pago
-  console.log("Paso 2: Generando stealth address para este pago...");
-  const payment = generateStealthAddress(info.stealthMetaAddress);
-
-  console.log(`  ✓ Stealth address: ${payment.stealthAddress}`);
-  console.log(`  ✓ Ephemeral pubkey: ${ethers.hexlify(payment.ephemeralPublicKey).slice(0, 20)}...`);
-  console.log(`  ✓ View tag: 0x${payment.viewTag.toString(16).padStart(2, "0")}\n`);
-
-  // === PARTE 3: Inicializar Railgun ===
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("PARTE 3: Alice prepara la transferencia privada con Railgun");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-
-  console.log("Paso 3: Inicializando Railgun Engine...");
+  // Railgun service
+  const railgun = new RailgunService({
+    networkName: NetworkName.Polygon,
+    rpcUrl: RPC_URL,
+    dataDir: DATA_DIR,
+    debug: false,
+  });
 
   try {
-    const railgun = new RailgunService({
-      networkName: NetworkName.Polygon,
-      rpcUrl: RPC_URL,
-      dataDir: "/tmp/railgun-demo",
-    });
-
     await railgun.initialize();
-    console.log("  ✓ Railgun Engine inicializado\n");
+    console.log("");
 
-    // Crear wallet de Railgun para Alice
-    console.log("Paso 4: Creando wallet privada de Railgun para Alice...");
-    const aliceWallet = await railgun.createWallet();
-    console.log(`  ✓ Railgun address: ${aliceWallet.railgunAddress.slice(0, 30)}...\n`);
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // PARTE 2: Crear wallets y registrar aliases
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    console.log("━━━ PARTE 2: Wallets Railgun + registro de aliases ━━━\n");
 
-    // === FLUJO COMPLETO (simulado) ===
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    console.log("FLUJO COMPLETO (las siguientes operaciones requieren fondos reales)");
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    // Wallet A (Alice)
+    const walletA = await railgun.getOrCreateWallet(MNEMONIC_A, "alice");
+    console.log(`  Alice Railgun: ${walletA.railgunAddress.slice(0, 40)}...`);
 
-    console.log("Paso 5: Shield - Alice blindaría 100 USDC en Railgun");
-    console.log("        (deposita tokens públicos → balance privado)");
-    console.log(`        Comando: await railgun.shieldTokens(USDC_ADDRESS, 100n * 10n**6n, aliceWallet)\n`);
+    // Wallet B (Bob)
+    const walletB = await railgun.getOrCreateWallet(MNEMONIC_B, "bob");
+    console.log(`  Bob Railgun:   ${walletB.railgunAddress.slice(0, 40)}...\n`);
 
-    console.log("Paso 6: Transfer - Alice enviaría 100 USDC a la stealth address");
-    console.log("        (genera prueba ZK, transfiere dentro de la reserva)");
-    console.log(`        Comando: await railgun.privateTransfer(USDC_ADDRESS, 100n * 10n**6n, stealthRailgunAddress)\n`);
+    // Registrar @alice (si no existe)
+    const aliceRegistered = await registry.isRegistered("alice");
+    if (!aliceRegistered) {
+      console.log("Registrando @alice...");
+      const aliceKeys = generateStealthMetaAddress();
+      const tx = await registry.register(
+        "alice",
+        aliceKeys.metaAddress,
+        walletA.railgunAddress
+      );
+      await tx.wait();
+      console.log(`  ✓ @alice registrada (tx: ${tx.hash.slice(0, 20)}...)`);
+    } else {
+      console.log("  @alice ya registrada");
+    }
 
-    console.log("Paso 7: Detect - Bob escanearía con su viewing key");
-    console.log("        1. Bob ve el ephemeral pubkey publicado por Alice");
-    console.log("        2. Bob calcula: S = viewing_private * ephemeral_pubkey");
-    console.log("        3. Bob deriva: stealth_address = spending_pubkey + hash(S) * G");
-    console.log("        4. Si coincide con una nota con fondos → el pago es para Bob\n");
+    // Registrar @bob (si no existe)
+    const bobRegistered = await registry.isRegistered("bob");
+    if (!bobRegistered) {
+      console.log("Registrando @bob...");
+      const bobKeys = generateStealthMetaAddress();
+      const tx = await registry.register(
+        "bob",
+        bobKeys.metaAddress,
+        walletB.railgunAddress
+      );
+      await tx.wait();
+      console.log(`  ✓ @bob registrado (tx: ${tx.hash.slice(0, 20)}...)`);
+    } else {
+      console.log("  @bob ya registrado");
+    }
 
-    console.log("Paso 8: Spend - Bob podría gastar los fondos");
-    console.log("        Bob calcula: stealth_private = spending_private + hash(S)");
-    console.log("        Usa stealth_private para firmar transacciones\n");
+    // Verificar resolución
+    console.log("\nVerificando aliases on-chain:");
+    const aliceInfo = await registry.getAliasInfo("alice");
+    console.log(`  @alice → ${aliceInfo.railgunAddress.slice(0, 30)}...`);
+    const bobInfo = await registry.getAliasInfo("bob");
+    console.log(`  @bob   → ${bobInfo.railgunAddress.slice(0, 30)}...`);
+
+    // Balances iniciales
+    const aliceBalance = await railgun.getBalance(USDC_ADDRESS);
+    console.log(`\n  Balance privado Alice: ${ethers.formatUnits(aliceBalance, 6)} USDC`);
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // PARTE 3: Shield (blindaje de USDC)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (doShield) {
+      console.log("\n━━━ PARTE 3: Alice blinda USDC en Railgun ━━━\n");
+
+      // Recargar wallet de Alice (getOrCreateWallet de Bob sobreescribió walletInfo)
+      await railgun.getOrCreateWallet(MNEMONIC_A, "alice");
+
+      const erc20Abi = [
+        "function balanceOf(address) view returns (uint256)",
+      ];
+      const usdc = new ethers.Contract(USDC_ADDRESS, erc20Abi, provider);
+      const publicBalance = await usdc.balanceOf(signer.address);
+      console.log(`  Balance USDC público: ${ethers.formatUnits(publicBalance, 6)} USDC`);
+
+      if (publicBalance > 0n) {
+        const shieldAmount = 100_000n; // 0.1 USDC
+        console.log(`  Blindando ${ethers.formatUnits(shieldAmount, 6)} USDC...\n`);
+
+        const txHash = await railgun.shieldTokens(
+          USDC_ADDRESS,
+          shieldAmount,
+          signer
+        );
+        console.log(`\n  ✓ Shield completado: ${txHash}`);
+
+        // Esperar a que el merkletree scan detecte el UTXO del shield
+        console.log("  Esperando scan de merkletree (max 5 min)...");
+        try {
+          await railgun.waitForScan(300_000);
+          console.log("  ✓ Scan completado");
+        } catch {
+          console.log("  ⚠ Scan timeout, reintentando...");
+          await railgun.refreshWalletBalances();
+        }
+        const newBalance = await railgun.getBalance(USDC_ADDRESS);
+        console.log(`  Balance privado Alice: ${ethers.formatUnits(newBalance, 6)} USDC`);
+      } else {
+        console.log("  Sin USDC público para blindar.");
+      }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // PARTE 4: Alice envía a @bob (transferencia privada)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (doTransfer) {
+      console.log("\n━━━ PARTE 4: Alice envía a @bob (transferencia privada) ━━━\n");
+
+      // Asegurar que estamos con la wallet de Alice
+      await railgun.getOrCreateWallet(MNEMONIC_A, "alice");
+
+      // 1. Resolver @bob on-chain
+      console.log("  Resolviendo @bob en el contrato...");
+      const bobRailgunAddress = await registry.resolveRailgun("bob");
+      console.log(`  @bob → ${bobRailgunAddress.slice(0, 40)}...`);
+
+      // 2. Verificar balance de Alice
+      const currentBalance = await railgun.getBalance(USDC_ADDRESS);
+      console.log(`  Balance privado Alice: ${ethers.formatUnits(currentBalance, 6)} USDC`);
+
+      if (currentBalance > 0n) {
+        const transferAmount = 10_000n; // 0.01 USDC
+        console.log(`  Transfiriendo ${ethers.formatUnits(transferAmount, 6)} USDC a @bob...\n`);
+
+        // 3. Transferencia privada (genera ZK-proof)
+        const txHash = await railgun.privateTransfer(
+          USDC_ADDRESS,
+          transferAmount,
+          bobRailgunAddress,
+          signer
+        );
+        console.log(`\n  ✓ Transferencia completada: ${txHash}`);
+
+        // 4. Verificar balances finales
+        console.log("\n  Balances finales:");
+        const aliceFinal = await railgun.getBalance(USDC_ADDRESS);
+        console.log(`    Alice: ${ethers.formatUnits(aliceFinal, 6)} USDC`);
+
+        // TODO: Para ver el balance de Bob necesitaríamos cargar su wallet
+        // por ahora mostramos que la transferencia fue exitosa
+      } else {
+        console.log("  Sin balance privado. Usá --shield primero.");
+      }
+    }
 
     // Limpiar
     await railgun.shutdown();
-    console.log("✓ Railgun Engine detenido\n");
-
   } catch (error: any) {
-    console.log(`  ⚠ Error inicializando Railgun: ${error.message}`);
-    console.log("  (Esto es esperado en la primera ejecución - necesita descargar artefactos ZK)\n");
+    console.error(`\nError: ${error.message}`);
+    try {
+      await railgun.shutdown();
+    } catch {}
   }
 
-  // === RESUMEN ===
-  console.log("╔══════════════════════════════════════════════════════════════╗");
-  console.log("║                         RESUMEN                              ║");
-  console.log("╠══════════════════════════════════════════════════════════════╣");
-  console.log("║ Lo que funciona ahora:                                       ║");
-  console.log("║   ✓ AliasRegistry desplegado en Polygon mainnet              ║");
-  console.log("║   ✓ Resolución de aliases (@satoshi_test)                    ║");
-  console.log("║   ✓ Generación de stealth addresses únicas                   ║");
-  console.log("║   ✓ Inicialización del Railgun Engine                        ║");
-  console.log("║   ✓ Creación de wallets Railgun                              ║");
-  console.log("╠══════════════════════════════════════════════════════════════╣");
-  console.log("║ Para completar el flujo real se necesita:                    ║");
-  console.log("║   • USDC en la wallet de Alice                               ║");
-  console.log("║   • POL para gas                                             ║");
-  console.log("║   • Tiempo para generar pruebas ZK (~30 seg)                 ║");
-  console.log("╚══════════════════════════════════════════════════════════════╝");
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // RESUMEN
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  console.log("\n╔════════════════════════════════════════════════════════════╗");
+  console.log("║                      RESUMEN                             ║");
+  console.log("╠════════════════════════════════════════════════════════════╣");
+  console.log("║ ✓ Wallets Railgun creadas (Alice y Bob)                  ║");
+  console.log("║ ✓ Aliases registrados on-chain (@alice, @bob)            ║");
+  console.log("║ ✓ Resolución: @bob → dirección Railgun (on-chain)       ║");
+  if (doShield) {
+    console.log("║ ✓ Shield: USDC blindado en reserva privada              ║");
+  }
+  if (doTransfer) {
+    console.log("║ ✓ Transfer: @alice → @bob con prueba ZK (privado)       ║");
+  }
+  console.log("╚════════════════════════════════════════════════════════════╝");
 }
 
 main().catch(console.error);

@@ -20,7 +20,7 @@ const config: HardhatUserConfig = {
   networks: {
     // Polygon Mainnet (muy barato ~$0.01-0.10 por tx)
     polygon: {
-      url: process.env.POLYGON_RPC || "https://polygon-mainnet.public.blastapi.io",
+      url: process.env.POLYGON_RPC || "https://polygon.drpc.org",
       accounts: [PRIVATE_KEY],
       chainId: 137,
     },

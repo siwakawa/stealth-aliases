@@ -1,14 +1,15 @@
 import { ethers, Contract, Provider, Signer } from "ethers";
-import AliasRegistryABI from "./abi/AliasRegistry.json";
+import AliasRegistryV2ABI from "./abi/AliasRegistryV2.json";
 
 // Direcciones del contrato desplegado
 export const DEPLOYMENTS: Record<number, string> = {
-  137: "0x0A8Fadf827a6e937C33C40c78017063168eaC76D", // Polygon Mainnet
+  137: "0x690BEA9b3420C961A2f490197fd92CeCA586F36d", // Polygon Mainnet (V2)
 };
 
 export interface AliasInfo {
   alias: string;
   stealthMetaAddress: string;
+  railgunAddress: string;
   isRegistered: boolean;
 }
 
@@ -23,11 +24,9 @@ export class AliasRegistryClient {
     chainId?: number
   ) {
     if ("getAddress" in providerOrSigner) {
-      // Es un Signer
       this.signer = providerOrSigner as Signer;
       this.provider = this.signer.provider!;
     } else {
-      // Es un Provider
       this.provider = providerOrSigner as Provider;
     }
 
@@ -40,19 +39,18 @@ export class AliasRegistryClient {
 
     this.contract = new Contract(
       address,
-      AliasRegistryABI,
+      AliasRegistryV2ABI,
       this.signer || this.provider
     );
   }
 
   /**
-   * Registra un alias con su stealth meta-address
-   * @param alias - El alias sin @ (ej: "bob")
-   * @param stealthMetaAddress - 66 bytes: viewing pubkey (33) + spending pubkey (33)
+   * Registra un alias con su stealth meta-address y dirección Railgun
    */
   async register(
     alias: string,
-    stealthMetaAddress: Uint8Array | string
+    stealthMetaAddress: Uint8Array | string,
+    railgunAddress: string
   ): Promise<ethers.TransactionResponse> {
     if (!this.signer) {
       throw new Error("Se necesita un signer para registrar");
@@ -63,18 +61,23 @@ export class AliasRegistryClient {
         ? stealthMetaAddress
         : ethers.hexlify(stealthMetaAddress);
 
-    const tx = await this.contract.register(alias, metaBytes);
+    const tx = await this.contract.register(alias, metaBytes, railgunAddress);
     return tx;
   }
 
   /**
-   * Resuelve un alias a su stealth meta-address
-   * @param alias - El alias sin @ (ej: "bob")
-   * @returns La stealth meta-address en hex (66 bytes)
+   * Resuelve un alias a su stealth meta-address y dirección Railgun
    */
-  async resolve(alias: string): Promise<string> {
-    const result = await this.contract.resolve(alias);
-    return result;
+  async resolve(alias: string): Promise<{ stealthMetaAddress: string; railgunAddress: string }> {
+    const [stealthMetaAddress, railgunAddress] = await this.contract.resolve(alias);
+    return { stealthMetaAddress, railgunAddress };
+  }
+
+  /**
+   * Resuelve un alias a su dirección Railgun únicamente
+   */
+  async resolveRailgun(alias: string): Promise<string> {
+    return this.contract.resolveRailgun(alias);
   }
 
   /**
@@ -90,14 +93,18 @@ export class AliasRegistryClient {
   async getAliasInfo(alias: string): Promise<AliasInfo> {
     const isRegistered = await this.isRegistered(alias);
     let stealthMetaAddress = "0x";
+    let railgunAddress = "";
 
     if (isRegistered) {
-      stealthMetaAddress = await this.resolve(alias);
+      const data = await this.resolve(alias);
+      stealthMetaAddress = data.stealthMetaAddress;
+      railgunAddress = data.railgunAddress;
     }
 
     return {
       alias,
       stealthMetaAddress,
+      railgunAddress,
       isRegistered,
     };
   }

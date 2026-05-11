@@ -12,8 +12,8 @@
     "test": "ts-node src/examples/demo.ts"
   },
   "dependencies": {
-    "@railgun-community/shared-models": "^7.6.1",
-    "@railgun-community/wallet": "^10.4.0",
+    "@railgun-community/shared-models": "^8.0.1",
+    "@railgun-community/wallet": "^10.8.6",
     "ethers": "^6.9.0",
     "leveldown": "^6.1.1",
     "snarkjs": "^0.7.6"

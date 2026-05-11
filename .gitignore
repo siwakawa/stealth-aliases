@@ -41,5 +41,8 @@ ejemplos/
 poc/
 /scripts/
 
+# Stealth keys (contain private keys!)
+stealth-keys-*.json
+
 # Misc
 *.tgz

@@ -6,6 +6,7 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "deploy:polygon": "hardhat run scripts/deploy.ts --network polygon",
+    "deploy:polygon:v2": "hardhat run scripts/deployV2.ts --network polygon",
     "deploy:amoy": "hardhat run scripts/deploy.ts --network polygonAmoy",
     "deploy:arbsepolia": "hardhat run scripts/deploy.ts --network arbitrumSepolia",
     "verify": "hardhat verify",

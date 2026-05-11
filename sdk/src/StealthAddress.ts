@@ -95,16 +95,18 @@ export function generateStealthAddress(
   const sharedSecret = computeSharedSecret(ephPrivKey, viewingPublicKey);
 
   // Hash del shared secret
-  const hashedSecret = ethers.keccak256(sharedSecret);
+  const hashedSecret = ethers.keccak256(ethers.hexlify(sharedSecret));
   const hashedSecretBytes = ethers.getBytes(hashedSecret);
 
   // View tag: primer byte del hash (para optimización de escaneo)
   const viewTag = hashedSecretBytes[0];
 
   // Stealth public key = spending_public + hash(shared_secret) * G
-  // Simplificación: usamos el hash como ajuste a la spending key
   const stealthPubKey = addPublicKeys(spendingPublicKey, hashedSecretBytes);
-  const stealthAddress = ethers.computeAddress(ethers.hexlify(stealthPubKey));
+  // computeAddress necesita clave no comprimida
+  const stealthAddress = ethers.computeAddress(
+    ethers.SigningKey.computePublicKey(ethers.hexlify(stealthPubKey), false)
+  );
 
   return {
     stealthAddress,
@@ -121,100 +123,112 @@ export function generateStealthAddress(
  * @param viewingPrivateKey - Nuestra clave privada de visualización
  * @param spendingPublicKey - Nuestra clave pública de gasto
  * @param viewTag - View tag para optimización (opcional)
+ * @param spendingPrivateKey - Nuestra clave privada de gasto (necesaria para derivar la clave de la stealth address)
  */
 export function checkStealthAddress(
   stealthAddress: string,
   ephemeralPublicKey: Uint8Array,
   viewingPrivateKey: Uint8Array,
   spendingPublicKey: Uint8Array,
-  viewTag?: number
-): { isOurs: boolean; spendingPrivateKey?: Uint8Array } {
+  viewTag?: number,
+  spendingPrivateKey?: Uint8Array
+): { isOurs: boolean; stealthPrivateKey?: Uint8Array } {
   // Shared secret: ECDH(viewing_private, ephemeral_public)
   const sharedSecret = computeSharedSecret(viewingPrivateKey, ephemeralPublicKey);
   const hashedSecret = ethers.keccak256(ethers.hexlify(sharedSecret));
   const hashedSecretBytes = ethers.getBytes(hashedSecret);
 
-  // Verificar view tag primero (optimización)
+  // Verificar view tag primero (optimización: descarta 255/256 de los anuncios)
   if (viewTag !== undefined && hashedSecretBytes[0] !== viewTag) {
     return { isOurs: false };
   }
 
-  // Calcular la stealth address esperada
+  // Calcular la stealth address esperada: P_stealth = P_spending + hash(S) * G
   const expectedPubKey = addPublicKeys(spendingPublicKey, hashedSecretBytes);
-  const expectedAddress = ethers.computeAddress(ethers.hexlify(expectedPubKey));
+  const expectedAddress = ethers.computeAddress(
+    ethers.SigningKey.computePublicKey(ethers.hexlify(expectedPubKey), false)
+  );
 
   if (expectedAddress.toLowerCase() !== stealthAddress.toLowerCase()) {
     return { isOurs: false };
   }
 
-  // Si es nuestra, calcular la clave privada para gastar
-  // spending_private_key = original_spending_private + hash(shared_secret)
-  // Nota: necesitaríamos la spending private key para esto
+  // Si es nuestra y tenemos la spending private key, derivar la clave privada de la stealth address
+  // stealth_private = spending_private + hash(shared_secret) mod n
+  if (spendingPrivateKey) {
+    const stealthPrivKey = addPrivateKeys(spendingPrivateKey, hashedSecretBytes);
+    return { isOurs: true, stealthPrivateKey: stealthPrivKey };
+  }
+
   return { isOurs: true };
 }
+
+// Orden de la curva secp256k1
+const SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
 
 // === Funciones auxiliares de criptografía ===
 
 /**
- * Comprime una clave pública de 65 bytes a 33 bytes
- */
-function compressPublicKey(uncompressedHex: string): Uint8Array {
-  const uncompressed = ethers.getBytes(uncompressedHex);
-  // uncompressed: 0x04 + x (32 bytes) + y (32 bytes)
-  const x = uncompressed.slice(1, 33);
-  const y = uncompressed.slice(33, 65);
-
-  // Prefijo: 0x02 si y es par, 0x03 si y es impar
-  const prefix = y[31] % 2 === 0 ? 0x02 : 0x03;
-
-  const compressed = new Uint8Array(33);
-  compressed[0] = prefix;
-  compressed.set(x, 1);
-
-  return compressed;
-}
-
-/**
- * Descomprime una clave pública de 33 bytes
- * Nota: Implementación simplificada, en producción usar una librería de curvas elípticas
+ * Descomprime una clave pública de 33 bytes a 65 bytes
  */
 function decompressPublicKey(compressed: Uint8Array): Uint8Array {
-  // Para una implementación completa necesitaríamos noble-secp256k1 o similar
-  // Por ahora retornamos un placeholder
   if (compressed[0] !== 0x02 && compressed[0] !== 0x03) {
     throw new Error("Formato de clave comprimida inválido");
   }
-  // TODO: Implementar descompresión real con librería de curvas elípticas
-  return compressed;
+  const uncompressed = ethers.SigningKey.computePublicKey(
+    ethers.hexlify(compressed),
+    false
+  );
+  return ethers.getBytes(uncompressed);
 }
 
 /**
- * Calcula ECDH shared secret
+ * Calcula ECDH shared secret (coordenada X del punto compartido)
+ * Implementación real usando ethers.SigningKey.computeSharedSecret
  */
 function computeSharedSecret(
   privateKey: Uint8Array,
   publicKey: Uint8Array
 ): Uint8Array {
   const signingKey = new ethers.SigningKey(ethers.hexlify(privateKey));
-  // Simplificación: usamos el hash de ambas claves como shared secret
-  // En producción usar ECDH real con noble-secp256k1
-  const combined = ethers.concat([privateKey, publicKey]);
-  return ethers.getBytes(ethers.keccak256(combined));
+  // computeSharedSecret retorna el punto completo (04 || x || y)
+  const sharedPoint = signingKey.computeSharedSecret(
+    ethers.hexlify(publicKey)
+  );
+  // Extraer coordenada X (bytes 1-33, saltando el prefijo 04)
+  return ethers.getBytes(sharedPoint).slice(1, 33);
 }
 
 /**
- * Suma una clave pública con un escalar (multiplicado por G)
- * P' = P + hash * G
+ * Suma una clave pública con un escalar multiplicado por G
+ * P' = P + scalar * G
+ * Implementación real usando ethers.SigningKey.addPoints
  */
 function addPublicKeys(
   publicKey: Uint8Array,
   scalar: Uint8Array
 ): Uint8Array {
-  // Implementación simplificada
-  // En producción usar noble-secp256k1: Point.fromHex(pubkey).add(Point.BASE.multiply(scalar))
-  const combined = ethers.concat([publicKey, scalar]);
-  const hash = ethers.keccak256(combined);
-  // Derivamos una "clave pública" del hash (no es criptográficamente correcto pero funcional para demo)
-  const signingKey = new ethers.SigningKey(hash);
-  return ethers.getBytes(signingKey.compressedPublicKey);
+  // scalar * G = tweak point (derivar clave pública del escalar)
+  const tweakSigningKey = new ethers.SigningKey(ethers.hexlify(scalar));
+  const tweakPubKey = tweakSigningKey.compressedPublicKey;
+  // P_stealth = P + scalar*G (point addition real sobre secp256k1)
+  const result = ethers.SigningKey.addPoints(
+    ethers.hexlify(publicKey),
+    tweakPubKey,
+    true // comprimido
+  );
+  return ethers.getBytes(result);
+}
+
+/**
+ * Suma dos claves privadas módulo el orden de secp256k1
+ * result = (a + b) mod n
+ */
+function addPrivateKeys(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const aBig = BigInt(ethers.hexlify(a));
+  const bBig = BigInt(ethers.hexlify(b));
+  const result = (aBig + bBig) % SECP256K1_ORDER;
+  // Convertir a 32 bytes con padding de ceros
+  const hex = result.toString(16).padStart(64, "0");
+  return ethers.getBytes("0x" + hex);
 }
