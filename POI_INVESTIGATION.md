@@ -87,3 +87,25 @@ Específicamente:
 2. El circuito (1x1, 1x2, etc.) puede no coincidir con lo que el contrato espera
 3. El SDK puede estar armando inputs inconsistentes
 4. El `sendWithPublicWallet: true` puede requerir configuración adicional
+
+---
+
+## Demostración de extremo a extremo (confirmada)
+
+Ejecución completa del flujo `@alice` → `@bob` sobre Polygon (red principal), con los
+identificadores en cadena para su verificación independiente:
+
+| Operación | Hash | Bloque | Gas |
+|-----------|------|--------|-----|
+| Registro `@alice` | `0xc864fc5f1f6c…` | 86.593.146 | 236.567 |
+| Registro `@bob` | `0xe61d9f81d874…` | 86.593.150 | 235.775 |
+| Transferencia privada (0,01 USDC) | `0x3cc8c3ebe675e47724d1d6de27f42ee9a061d862fcd3f035ceac3fea7f19db59` | 86.744.133 | 1.001.580 |
+
+Contrato: `AliasRegistryV2` en `0x690BEA9b3420C961A2f490197fd92CeCA586F36d`.
+La transferencia se dirige al proxy de Railgun `0x19b620929f97b7b990801496c3b361ca5def8c71`.
+
+**Nota sobre la privacidad de esta demostración:** las tres transacciones se emiten desde la
+misma dirección (`0xe7f9cc4f…a315`), que además figura como `registrant` en ambos eventos
+`AliasRegistered`. Es un artefacto del script, que usa una única billetera por simplicidad:
+un observador puede por lo tanto vincular la transferencia con ambos aliases. Un uso real
+requiere billeteras separadas por participante.

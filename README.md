@@ -35,16 +35,20 @@ Este proyecto permite registrar aliases humanos que resuelven a stealth meta-add
 
 ## Contratos Desplegados
 
-| Red | Dirección |
-|-----|-----------|
-| Polygon Mainnet | `0x0A8Fadf827a6e937C33C40c78017063168eaC76D` |
+| Contrato | Red | Dirección | Estado |
+|----------|-----|-----------|--------|
+| `AliasRegistryV2` | Polygon Mainnet | `0x690BEA9b3420C961A2f490197fd92CeCA586F36d` | **En uso** |
+| `AliasRegistry` (v1) | Polygon Mainnet | `0x0A8Fadf827a6e937C33C40c78017063168eaC76D` | Histórico |
+
+`AliasRegistryV2` es el contrato vigente: agrega la dirección Railgun del receptor, sin la cual no es posible enrutar una transferencia privada. La v1 almacenaba únicamente la metadirección sigilosa y se conserva solo como referencia histórica.
 
 ## Estructura
 
 ```
 ├── contracts/          # Smart contracts (Hardhat)
 │   ├── src/
-│   │   └── AliasRegistry.sol
+│   │   ├── AliasRegistry.sol      # v1 (histórico)
+│   │   └── AliasRegistryV2.sol    # vigente
 │   ├── test/
 │   └── scripts/
 │

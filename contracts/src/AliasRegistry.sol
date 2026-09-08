@@ -24,7 +24,7 @@ contract AliasRegistry {
 
     /// @notice Registra un nuevo alias con su metadirección sigilosa
     /// @param alias_ El alias deseado (3-32 caracteres, a-z, 0-9, _)
-    /// @param stealthMetaAddress Metadirección de 66 bytes (33 spending + 33 viewing)
+    /// @param stealthMetaAddress Metadirección de 66 bytes (33 viewing + 33 spending)
     function register(
         string calldata alias_,
         bytes calldata stealthMetaAddress

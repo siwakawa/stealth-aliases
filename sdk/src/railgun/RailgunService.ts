@@ -1,7 +1,7 @@
 /**
  * Servicio de integración con Railgun
  *
- * Implementación real usando @railgun-community/wallet v10.4.0
+ * Implementación real usando @railgun-community/wallet v10.8.6
  * para operaciones privadas (shield, transfer) en redes EVM.
  */
 
