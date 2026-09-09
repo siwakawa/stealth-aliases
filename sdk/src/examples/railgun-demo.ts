@@ -92,6 +92,10 @@ async function main() {
     const walletB = await railgun.getOrCreateWallet(MNEMONIC_B, "bob");
     console.log(`  Bob Railgun:   ${walletB.railgunAddress.slice(0, 40)}...\n`);
 
+    // Balance privado inicial de Bob (la wallet activa es Bob, recién creada)
+    // Se guarda para verificar la recepción al final del flujo.
+    const bobBalanceInitial = await railgun.getBalance(USDC_ADDRESS);
+
     // Registrar @alice (si no existe)
     const aliceRegistered = await registry.isRegistered("alice");
     if (!aliceRegistered) {
@@ -132,6 +136,9 @@ async function main() {
     console.log(`  @bob   → ${bobInfo.railgunAddress.slice(0, 30)}...`);
 
     // Balances iniciales
+    // Volver a la wallet de Alice: crear la de Bob la dejó como wallet activa,
+    // así que sin este reload el balance de abajo sería el de Bob, no el de Alice.
+    await railgun.getOrCreateWallet(MNEMONIC_A, "alice");
     const aliceBalance = await railgun.getBalance(USDC_ADDRESS);
     console.log(`\n  Balance privado Alice: ${ethers.formatUnits(aliceBalance, 6)} USDC`);
 
@@ -214,8 +221,21 @@ async function main() {
         const aliceFinal = await railgun.getBalance(USDC_ADDRESS);
         console.log(`    Alice: ${ethers.formatUnits(aliceFinal, 6)} USDC`);
 
-        // TODO: Para ver el balance de Bob necesitaríamos cargar su wallet
-        // por ahora mostramos que la transferencia fue exitosa
+        // 5. Bob verifica su balance: cargar su wallet y confirmar la recepción
+        console.log("\n  Verificando recepción en la wallet de Bob...");
+        await railgun.getOrCreateWallet(MNEMONIC_B, "bob"); // recarga + refreshBalances
+        const bobFinal = await railgun.getBalance(USDC_ADDRESS);
+        const bobDelta = bobFinal - bobBalanceInitial;
+        console.log(
+          `    Bob: ${ethers.formatUnits(bobFinal, 6)} USDC (recibió +${ethers.formatUnits(bobDelta, 6)})`
+        );
+        if (bobDelta >= transferAmount) {
+          console.log("    ✓ Bob recibió la transferencia privada");
+        } else {
+          console.log(
+            "    ⚠ La nota (UTXO) de Bob puede seguir en scan/POI-pending; reintentá más tarde"
+          );
+        }
       } else {
         console.log("  Sin balance privado. Usá --shield primero.");
       }
@@ -244,6 +264,7 @@ async function main() {
   }
   if (doTransfer) {
     console.log("║ ✓ Transfer: @alice → @bob con prueba ZK (privado)       ║");
+    console.log("║ ✓ Bob verifica la recepción de los fondos               ║");
   }
   console.log("╚════════════════════════════════════════════════════════════╝");
 }
