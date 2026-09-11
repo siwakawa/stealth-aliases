@@ -62,6 +62,7 @@ export class AliasRegistryClient {
         : ethers.hexlify(stealthMetaAddress);
 
     const tx = await this.contract.register(alias, metaBytes, railgunAddress);
+    await tx.wait();
     return tx;
   }
 

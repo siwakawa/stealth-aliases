@@ -168,19 +168,6 @@ const SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E
 
 // === Funciones auxiliares de criptografía ===
 
-/**
- * Descomprime una clave pública de 33 bytes a 65 bytes
- */
-function decompressPublicKey(compressed: Uint8Array): Uint8Array {
-  if (compressed[0] !== 0x02 && compressed[0] !== 0x03) {
-    throw new Error("Formato de clave comprimida inválido");
-  }
-  const uncompressed = ethers.SigningKey.computePublicKey(
-    ethers.hexlify(compressed),
-    false
-  );
-  return ethers.getBytes(uncompressed);
-}
 
 /**
  * Calcula ECDH shared secret (coordenada X del punto compartido)
