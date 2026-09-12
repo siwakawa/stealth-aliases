@@ -43,6 +43,16 @@ const config: HardhatUserConfig = {
       chainId: 84532,
     },
   },
+  // Verificación pública sin clave de API ni registro.
+  // Nota: el plugin instalado consulta un endpoint de Sourcify que ya no existe
+  // (/check-all-by-addresses). La verificación se hizo contra la API v2, que
+  // además reenvía el resultado a Etherscan/Polygonscan:
+  //   POST https://sourcify.dev/server/v2/verify/137/<direccion>
+  //   cuerpo: { stdJsonInput, compilerVersion, contractIdentifier }
+  // El stdJsonInput sale de artifacts/build-info/*.json (campo "input").
+  sourcify: {
+    enabled: true,
+  },
   etherscan: {
     apiKey: {
       polygon: process.env.POLYGONSCAN_API_KEY || "",

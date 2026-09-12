@@ -8,7 +8,7 @@
  *
  * Flujo completo:
  * 1. Crear una wallet Railgun para cada participante
- * 2. Registrar ambos aliases en AliasRegistryV2, cada uno desde su billetera
+ * 2. Registrar ambos aliases en AliasRegistry, cada uno desde su billetera
  * 3. La emisora blinda USDC en la reserva privada de Railgun (shield)
  * 4. La emisora resuelve el alias del receptor → dirección Railgun
  * 5. Transfiere USDC dentro de la reserva (transferencia privada con ZK-proof)
@@ -40,7 +40,7 @@ const MNEMONIC_B = process.env.MNEMONIC_B;
 const PRIVATE_KEY_B = process.env.PRIVATE_KEY_B;
 // Los aliases son inmutables: si ya están tomados hay que usar otros.
 const ALIAS_A = process.env.ALIAS_A || "alice";
-const ALIAS_B = process.env.ALIAS_B || "peter";
+const ALIAS_B = process.env.ALIAS_B || "bob";
 
 // USDC en Polygon (6 decimales)
 const USDC_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
@@ -145,7 +145,7 @@ async function main() {
   const signerB = new ethers.Wallet(PRIVATE_KEY_B, provider);
   const registryB = new AliasRegistryClient(signerB);
   console.log(`Wallet pública de ${ALIAS_B}: ${signerB.address}`);
-  console.log(`AliasRegistryV2: ${registry.getContractAddress()}\n`);
+  console.log(`AliasRegistry: ${registry.getContractAddress()}\n`);
 
   // Railgun service
   const railgun = new RailgunService({

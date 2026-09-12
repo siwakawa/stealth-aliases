@@ -21,6 +21,12 @@
         "type": "bytes"
       },
       {
+        "indexed": false,
+        "internalType": "string",
+        "name": "railgunAddress",
+        "type": "string"
+      },
+      {
         "indexed": true,
         "internalType": "address",
         "name": "registrant",
@@ -98,6 +104,11 @@
         "internalType": "bytes",
         "name": "stealthMetaAddress",
         "type": "bytes"
+      },
+      {
+        "internalType": "string",
+        "name": "railgunAddress",
+        "type": "string"
       }
     ],
     "name": "register",
@@ -117,8 +128,13 @@
     "outputs": [
       {
         "internalType": "bytes",
-        "name": "",
+        "name": "stealthMetaAddress",
         "type": "bytes"
+      },
+      {
+        "internalType": "string",
+        "name": "railgunAddress",
+        "type": "string"
       }
     ],
     "stateMutability": "view",
@@ -136,8 +152,32 @@
     "outputs": [
       {
         "internalType": "bytes",
-        "name": "",
+        "name": "stealthMetaAddress",
         "type": "bytes"
+      },
+      {
+        "internalType": "string",
+        "name": "railgunAddress",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "alias_",
+        "type": "string"
+      }
+    ],
+    "name": "resolveRailgun",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
       }
     ],
     "stateMutability": "view",

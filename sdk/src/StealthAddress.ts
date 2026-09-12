@@ -2,11 +2,14 @@ import { ethers } from "ethers";
 
 /**
  * Stealth Meta-Address según ERC-5564
- * 66 bytes = viewing pubkey (33 compressed) + spending pubkey (33 compressed)
+ *
+ * 66 bytes = spending pubkey (33 comprimida) + viewing pubkey (33 comprimida),
+ * en ese orden. Es el que fija el estándar, y respetarlo es lo que permite que
+ * una herramienta de terceros interprete la metadirección correctamente.
  */
 export interface StealthMetaAddress {
-  viewingPublicKey: Uint8Array; // 33 bytes (compressed secp256k1)
   spendingPublicKey: Uint8Array; // 33 bytes (compressed secp256k1)
+  viewingPublicKey: Uint8Array; // 33 bytes (compressed secp256k1)
 }
 
 /**
@@ -38,10 +41,10 @@ export function generateStealthMetaAddress(): {
   const viewing = generateKeyPair();
   const spending = generateKeyPair();
 
-  // Concatenar: viewing pubkey (33) + spending pubkey (33) = 66 bytes
+  // Concatenar según ERC-5564: spending pubkey (33) + viewing pubkey (33) = 66 bytes
   const metaAddress = new Uint8Array(66);
-  metaAddress.set(viewing.publicKey, 0);
-  metaAddress.set(spending.publicKey, 33);
+  metaAddress.set(spending.publicKey, 0);
+  metaAddress.set(viewing.publicKey, 33);
 
   return { viewing, spending, metaAddress };
 }
@@ -62,8 +65,8 @@ export function parseStealthMetaAddress(
   }
 
   return {
-    viewingPublicKey: bytes.slice(0, 33),
-    spendingPublicKey: bytes.slice(33, 66),
+    spendingPublicKey: bytes.slice(0, 33),
+    viewingPublicKey: bytes.slice(33, 66),
   };
 }
 

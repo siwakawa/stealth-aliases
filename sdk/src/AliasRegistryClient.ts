@@ -1,9 +1,9 @@
 import { ethers, Contract, Provider, Signer } from "ethers";
-import AliasRegistryV2ABI from "./abi/AliasRegistryV2.json";
+import AliasRegistryABI from "./abi/AliasRegistry.json";
 
 // Direcciones del contrato desplegado
 export const DEPLOYMENTS: Record<number, string> = {
-  137: "0x690BEA9b3420C961A2f490197fd92CeCA586F36d", // Polygon Mainnet (V2)
+  137: "0xEee312ACa2dCdCF372eDD5CE6D58419F6459bA9d", // Polygon Mainnet
 };
 
 export interface AliasInfo {
@@ -39,7 +39,7 @@ export class AliasRegistryClient {
 
     this.contract = new Contract(
       address,
-      AliasRegistryV2ABI,
+      AliasRegistryABI,
       this.signer || this.provider
     );
   }

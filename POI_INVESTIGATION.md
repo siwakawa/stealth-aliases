@@ -101,7 +101,7 @@ identificadores en cadena para su verificación independiente:
 | Registro `@bob` | `0xe61d9f81d874…` | 86.593.150 | 235.775 |
 | Transferencia privada (0,01 USDC) | `0x3cc8c3ebe675e47724d1d6de27f42ee9a061d862fcd3f035ceac3fea7f19db59` | 86.744.133 | 1.001.580 |
 
-Contrato: `AliasRegistryV2` en `0x690BEA9b3420C961A2f490197fd92CeCA586F36d`.
+Contrato: `AliasRegistry` en `0x690BEA9b3420C961A2f490197fd92CeCA586F36d`.
 La transferencia se dirige al proxy de Railgun `0x19b620929f97b7b990801496c3b361ca5def8c71`.
 
 **Nota sobre la privacidad de esta demostración:** las tres transacciones se emiten desde la

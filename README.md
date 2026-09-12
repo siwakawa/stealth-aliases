@@ -37,10 +37,10 @@ Este proyecto permite registrar aliases humanos que resuelven a stealth meta-add
 
 | Contrato | Red | Dirección | Estado |
 |----------|-----|-----------|--------|
-| `AliasRegistryV2` | Polygon Mainnet | `0x690BEA9b3420C961A2f490197fd92CeCA586F36d` | **En uso** |
+| `AliasRegistry` | Polygon Mainnet | `0x690BEA9b3420C961A2f490197fd92CeCA586F36d` | **En uso** |
 | `AliasRegistry` (v1) | Polygon Mainnet | `0x0A8Fadf827a6e937C33C40c78017063168eaC76D` | Histórico |
 
-`AliasRegistryV2` es el contrato vigente: agrega la dirección Railgun del receptor, sin la cual no es posible enrutar una transferencia privada. La v1 almacenaba únicamente la metadirección sigilosa y se conserva solo como referencia histórica.
+`AliasRegistry` es el contrato vigente: agrega la dirección Railgun del receptor, sin la cual no es posible enrutar una transferencia privada. La v1 almacenaba únicamente la metadirección sigilosa y se conserva solo como referencia histórica.
 
 ## Estructura
 
@@ -48,7 +48,7 @@ Este proyecto permite registrar aliases humanos que resuelven a stealth meta-add
 ├── contracts/          # Smart contracts (Hardhat)
 │   ├── src/
 │   │   ├── AliasRegistry.sol      # v1 (histórico)
-│   │   └── AliasRegistryV2.sol    # vigente
+│   │   └── AliasRegistry.sol    # vigente
 │   ├── test/
 │   └── scripts/
 │
@@ -103,7 +103,7 @@ El flujo privado completo `@alice` → `@bob` se ejecuta **desde la terminal** c
 (no hay interfaz web). Los pasos son:
 
 1. Crear las billeteras Railgun de Alice y Bob.
-2. Registrar ambos aliases on-chain en `AliasRegistryV2`.
+2. Registrar ambos aliases on-chain en `AliasRegistry`.
 3. Alice **blinda** USDC en la reserva privada de Railgun (*shield*).
 4. Alice resuelve `@bob` → dirección Railgun del receptor.
 5. Alice **transfiere** USDC a Bob dentro de la reserva (transferencia privada con prueba ZK).
