@@ -109,3 +109,23 @@ misma dirección (`0xe7f9cc4f…a315`), que además figura como `registrant` en 
 `AliasRegistered`. Es un artefacto del script, que usa una única billetera por simplicidad:
 un observador puede por lo tanto vincular la transferencia con ambos aliases. Un uso real
 requiere billeteras separadas por participante.
+
+---
+
+## Actualización (12 de septiembre de 2026): el agregador POI desapareció
+
+El agregador al que apunta este documento como solución, `ppoi-agg.horsewithsixlegs.xyz`,
+**dejó de existir**: ni el subdominio ni el dominio base resuelven en DNS. Con el nodo
+inalcanzable, las notas blindadas quedan en `ShieldPending` de forma indefinida y sin
+error visible, que es el mismo síntoma descrito más arriba.
+
+O sea que el diagnóstico original ---"la URL no resolvía"--- era correcto en su forma pero
+la solución no era estable: el reemplazo también murió. La conclusión útil es otra, y es
+la que conviene recordar: **los fondos blindados dependen de un servicio comunitario
+externo que puede desaparecer, y cuando desaparece quedan inmovilizados en silencio.**
+
+Nodo operativo verificado al día de hoy: `https://ppoi.fdi.network` (cubre Polygon,
+sincronizado). La lista se configura ahora por `POI_NODE_URLS` en el `.env`, sin URLs
+escritas en el código.
+
+Ver `DEMO_ENLAZABILIDAD.md`, sección 6, para el diagnóstico completo.

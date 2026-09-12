@@ -19,7 +19,7 @@ import {
 config({ path: path.join(__dirname, "../../../contracts/.env") });
 
 const RPC_URL =
-  process.env.POLYGON_RPC || "https://polygon-mainnet.public.blastapi.io";
+  process.env.POLYGON_RPC;
 
 async function main() {
   console.log("=== Demo: Aliases + Stealth Addresses (crypto real) ===\n");

@@ -145,7 +145,22 @@ export class RailgunService {
 
     // 4. Iniciar el engine
     console.log("Inicializando Railgun Engine...");
-    const poiNodeURLs = ["https://ppoi-agg.horsewithsixlegs.xyz"];
+    // Nodos de Prueba de Inocencia, tomados de POI_NODE_URLS (separados por coma).
+    // Sin al menos uno alcanzable, las notas blindadas nunca salen del estado
+    // pendiente y los fondos no se pueden gastar, sin error visible. Son
+    // servicios comunitarios que pueden desaparecer, de modo que la lista se
+    // configura por entorno y no se fija en el código.
+    const poiNodeURLs = (process.env.POI_NODE_URLS || "")
+      .split(",")
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0);
+
+    if (poiNodeURLs.length === 0) {
+      throw new Error(
+        "POI_NODE_URLS no configurado en el .env. Sin un nodo de Prueba de " +
+          "Inocencia alcanzable los fondos blindados no llegan a ser gastables."
+      );
+    }
 
     await startRailgunEngine(
       "stealthaliases", // walletSource (max 16 chars, lowercase)
