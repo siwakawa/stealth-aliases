@@ -9,10 +9,13 @@ describe("AliasRegistry", function () {
   let alice: SignerWithAddress;
   let bob: SignerWithAddress;
 
-  // Metadirección de ejemplo (66 bytes = 33 viewing + 33 spending)
+  // Metadirección de ejemplo, en el orden que fija ERC-5564:
+  // 66 bytes = clave de gasto (33) + clave de visualización (33)
+  const sampleSpendingKey = "0x02" + "a".repeat(64);
+  const sampleViewingKey = "0x03" + "b".repeat(64);
   const sampleMetaAddress = ethers.concat([
-    "0x02" + "a".repeat(64), // Viewing pubkey (33 bytes)
-    "0x03" + "b".repeat(64), // Spending pubkey (33 bytes)
+    sampleSpendingKey,
+    sampleViewingKey,
   ]);
 
   // Dirección Railgun de ejemplo
@@ -194,6 +197,21 @@ describe("AliasRegistry", function () {
 
       expect(await registry.isRegisteredByHash(aliceHash)).to.be.true;
       expect(await registry.isRegisteredByHash(bobHash)).to.be.false;
+    });
+  });
+
+  describe("Formato de la metadirección (ERC-5564)", function () {
+    it("debería preservar el orden de claves: gasto primero, visualización después", async function () {
+      // El estándar fija la clave de gasto en los primeros 33 bytes. El registro
+      // guarda la metadirección como una secuencia opaca, de modo que quien la
+      // construye es responsable del orden; esta prueba impide que se invierta
+      // sin que nadie lo note, que fue exactamente lo que ocurrió una vez.
+      await registry.connect(alice).register("formato", sampleMetaAddress, sampleRailgunAddress);
+
+      const [meta] = await registry.resolve("formato");
+      expect(ethers.dataLength(meta)).to.equal(66);
+      expect(ethers.dataSlice(meta, 0, 33)).to.equal(sampleSpendingKey);
+      expect(ethers.dataSlice(meta, 33, 66)).to.equal(sampleViewingKey);
     });
   });
 

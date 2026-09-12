@@ -9,6 +9,13 @@ Nada de lo que sigue es un defecto del diseño del sistema de aliases: el regist
 aliases y la transferencia privada funcionaban como estaban especificados. El defecto
 estaba en el programa que los ejercita.
 
+> **Estado actual.** El registro en uso es `AliasRegistry`, desplegado en
+> `0xEee312ACa2dCdCF372eDD5CE6D58419F6459bA9d`. Se desplegó de nuevo para corregir el
+> orden de claves de la metadirección (ver más abajo): como los aliases son inmutables,
+> arreglarlo sobre el registro anterior habría dejado entradas con dos convenciones
+> distintas y sin forma de distinguirlas. El espacio de nombres vacío permitió además
+> recuperar `@alice` y `@bob`.
+
 ---
 
 ## 1. El defecto
@@ -71,17 +78,16 @@ imprime por consola.
 ## 4. Evidencia en cadena
 
 Verificación independiente, leyendo los eventos `AliasRegistered` del contrato
-`0x690BEA9b3420C961A2f490197fd92CeCA586F36d` en Polygon:
+`0xEee312ACa2dCdCF372eDD5CE6D58419F6459bA9d` en Polygon:
 
 | Alias | `registrant` | Bloque | Transacción |
 |---|---|---|---|
-| `@alice` | `0xE7f9CC4f55bdAbe778853882bc9C3daf2117a315` | 86.593.146 | `0xc864fc5f1f6c600ccf318687bcfd230276940cec9ebdfb60da482f2967f5b112` |
-| `@peter` | `0x85b156c06204Fc214566c88A92aD479FaE163101` | 93.683.401 | `0x91517e56682c17c921584dca40288c44d2e5802422a3424eac7449f84d319351` |
+| `@alice` | `0xE7f9CC4f55bdAbe778853882bc9C3daf2117a315` | 93.699.091 | `0xf41ef261f4d5cf4bb2481f46cf723fc3a8b1199228687c607aa7a0ea1664bc8f` |
+| `@bob` | `0x85b156c06204Fc214566c88A92aD479FaE163101` | 93.699.095 | `0x195170453dc72db3755e11158d1c3ecee7034b18fe8cd9efe3f45cabdee7f42c` |
 
 - Registrantes distintos.
 - Direcciones Railgun distintas.
-- Ambas direcciones `0zk` miden **127 caracteres**, dato que confirma el orden de magnitud
-  usado en la prueba de costo de gas.
+- Ambas direcciones `0zk` miden **127 caracteres**.
 
 Para reproducirlo: `npx ts-node src/examples/verificar-enlazabilidad.ts` desde `sdk/`.
 
@@ -158,6 +164,10 @@ que no se corresponde con ninguna constante de las versiones en uso.
 
 ## 7. Mediciones de gas
 
+> Las cifras de esta sección corresponden al **registro anterior**
+> (`0x690BEA9b…`), que es donde se observó la anomalía que se analiza más abajo.
+> Las mediciones vigentes, sobre el registro en uso, están en la sección 8.
+
 Transacciones reales (Polygon, red principal):
 
 | Operación | Gas | Precio | Costo | Bloque |
@@ -211,34 +221,23 @@ mayor que el efecto que se pretende medir. La medición controlada no tiene ese 
 
 ## 8. Resultado de la demostración
 
-Ejecución completa sobre Polygon (red principal), 12 de septiembre de 2026:
+Ejecución completa sobre Polygon (red principal), 12 de septiembre de 2026, contra el
+registro `0xEee312ACa2dCdCF372eDD5CE6D58419F6459bA9d`:
 
 | Operación | Hash | Bloque | Gas |
 |---|---|---|---|
-| Registro `@peter` (billetera B) | `0x91517e56682c17c921584dca40288c44d2e5802422a3424eac7449f84d319351` | 93.683.401 | 249.167 |
-| Blindaje de 0,1 USDC | `0x758b2e785b67269693b923fd1f86c18d964fef337ffe126642ee0493a25ed0dc` | 93.683.430 | 853.785 |
-| Transferencia privada de 0,01 USDC | `0x2cce7e0f6572450c7ba22798715de2a5fbfd53289ec7af3a417594cb1ac10de4` | 93.686.897 | 1.300.669 |
+| Registro `@alice` (billetera de la emisora) | `0xf41ef261f4d5cf4bb2481f46cf723fc3a8b1199228687c607aa7a0ea1664bc8f` | 93.699.091 | 249.167 |
+| Registro `@bob` (billetera del receptor) | `0x195170453dc72db3755e11158d1c3ecee7034b18fe8cd9efe3f45cabdee7f42c` | 93.699.095 | 248.375 |
+| Blindaje de 0,1 USDC | `0xbf0556c0d1f81b0be759835e21f752f1b77aa61d1254b7a543b978a4fe062e63` | 93.699.109 | 837.732 |
+| Transferencia privada de 0,01 USDC | `0x9fadaa20b591ccd35009fd619e54bf21481b30a8e140b760778cc15f4da8e71f` | 93.699.157 | 1.300.681 |
 
 La transferencia se confirmó con `status: 1` y el receptor verificó la recepción desde su
-propia billetera (`+0,01 USDC`), de modo que la comprobación de recepción forma parte de
-esta ejecución y no es posterior a ella.
+propia billetera (`+0,01 USDC`).
 
-### Tiempos medidos
-
-| Operación | Medido | La tesina afirma |
-|---|---|---|
-| Sincronización incremental del árbol de Merkle | 2,4 s y 12,6 s | 14 a 18 s |
-| Prueba de conocimiento cero y envío | 12,6 s | 1,5 s de prueba, 20 s la operación completa |
-| Refresco de balances y pruebas POI | ~12,5 s | --- |
-
-La sincronización incremental resultó más rápida de lo que afirma el texto; el tiempo
-varía según cuántos bloques hayan pasado desde el último escaneo (2,4 s con la base recién
-usada, 12,6 s tras un intervalo mayor). El valor de 12,6 s para la transferencia incluye
-la generación de la prueba y el envío con confirmación, de modo que no es directamente
-comparable con el 1,5 s que la tesina atribuye sólo a la prueba.
-
-El arranque en frío dejó una base local (`railgun.db`) de **91 MB**, consistente con los
-~83 MB que la tesina reporta para la descarga inicial del árbol de Merkle.
+Los dos registros se hicieron con minutos de diferencia sobre el mismo contrato, de modo
+que son directamente comparables: **792 unidades de gas de diferencia sobre dos caracteres
+de alias, esto es 396 por carácter**, que coincide con la medición controlada de la
+sección anterior.
 
 ## 9. Correcciones posteriores a la ejecución
 
