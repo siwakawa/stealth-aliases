@@ -6,6 +6,12 @@ export const DEPLOYMENTS: Record<number, string> = {
   137: "0xEee312ACa2dCdCF372eDD5CE6D58419F6459bA9d", // Polygon Mainnet
 };
 
+// Bloque anterior al despliegue en cada red: acota la búsqueda de eventos, que
+// de otro modo recorrería toda la historia de la cadena.
+const DEPLOYMENT_BLOCKS: Record<number, number> = {
+  137: 93_690_000,
+};
+
 export interface AliasInfo {
   alias: string;
   stealthMetaAddress: string;
@@ -17,6 +23,7 @@ export class AliasRegistryClient {
   private contract: Contract;
   private provider: Provider;
   private signer?: Signer;
+  private fromBlock: number;
 
   constructor(
     providerOrSigner: Provider | Signer,
@@ -32,6 +39,7 @@ export class AliasRegistryClient {
 
     const address =
       contractAddress || DEPLOYMENTS[chainId || 137];
+    this.fromBlock = DEPLOYMENT_BLOCKS[chainId || 137] ?? 0;
 
     if (!address) {
       throw new Error(`No hay deployment para chainId ${chainId}`);
@@ -42,28 +50,6 @@ export class AliasRegistryClient {
       AliasRegistryABI,
       this.signer || this.provider
     );
-  }
-
-  /**
-   * Registra un alias con su stealth meta-address y dirección Railgun
-   */
-  async register(
-    alias: string,
-    stealthMetaAddress: Uint8Array | string,
-    railgunAddress: string
-  ): Promise<ethers.TransactionResponse> {
-    if (!this.signer) {
-      throw new Error("Se necesita un signer para registrar");
-    }
-
-    const metaBytes =
-      typeof stealthMetaAddress === "string"
-        ? stealthMetaAddress
-        : ethers.hexlify(stealthMetaAddress);
-
-    const tx = await this.contract.register(alias, metaBytes, railgunAddress);
-    await tx.wait();
-    return tx;
   }
 
   /**
@@ -134,6 +120,24 @@ export class AliasRegistryClient {
       railgunAddress,
       isRegistered,
     };
+  }
+
+  /**
+   * Devuelve los aliases registrados que reciben en una dirección Railgun.
+   *
+   * El contrato no guarda el mapeo inverso, de modo que se reconstruye a partir
+   * de los eventos de registro.
+   */
+  async aliasesPointingTo(railgunAddress: string): Promise<string[]> {
+    const events = await this.contract.queryFilter(
+      this.contract.filters.AliasRegistered(),
+      this.fromBlock,
+      "latest"
+    );
+    return events
+      .map((e) => (e as ethers.EventLog).args)
+      .filter((args) => args.railgunAddress === railgunAddress)
+      .map((args) => args.alias_ as string);
   }
 
   /**

@@ -20,25 +20,25 @@ const config: HardhatUserConfig = {
   networks: {
     // Polygon Mainnet (muy barato ~$0.01-0.10 por tx)
     polygon: {
-      url: process.env.POLYGON_RPC || "https://polygon.drpc.org",
+      url: process.env.POLYGON_RPC || "",
       accounts: [PRIVATE_KEY],
       chainId: 137,
     },
     // Polygon Amoy Testnet
     polygonAmoy: {
-      url: process.env.POLYGON_AMOY_RPC || "https://rpc-amoy.polygon.technology",
+      url: process.env.POLYGON_AMOY_RPC || "",
       accounts: [PRIVATE_KEY],
       chainId: 80002,
     },
     // Arbitrum Sepolia Testnet
     arbitrumSepolia: {
-      url: process.env.ARBITRUM_SEPOLIA_RPC || "https://sepolia-rollup.arbitrum.io/rpc",
+      url: process.env.ARBITRUM_SEPOLIA_RPC || "",
       accounts: [PRIVATE_KEY],
       chainId: 421614,
     },
     // Base Sepolia Testnet
     baseSepolia: {
-      url: process.env.BASE_SEPOLIA_RPC || "https://sepolia.base.org",
+      url: process.env.BASE_SEPOLIA_RPC || "",
       accounts: [PRIVATE_KEY],
       chainId: 84532,
     },

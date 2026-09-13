@@ -26,6 +26,7 @@ import {
   gasEstimateForUnprovenCrossContractCalls,
   balanceForERC20Token,
   refreshBalances,
+  refreshReceivePOIsForWallet,
   generatePOIsForWallet,
   calculateBroadcasterFeeERC20Amount,
   ArtifactStore,
@@ -66,8 +67,11 @@ const snarkjs = require("snarkjs");
 /**
  * Configuración de red para Railgun
  */
+/** Redes en las que Railgun está desplegado y el servicio puede operar. */
+export type SupportedNetwork = "Ethereum" | "Polygon" | "Arbitrum" | "BNB_Chain";
+
 export interface RailgunConfig {
-  networkName: NetworkName;
+  networkName: SupportedNetwork;
   rpcUrl: string;
   dataDir: string;
   debug?: boolean;
@@ -93,6 +97,9 @@ export class RailgunService {
   private encryptionKey: string;
   private provider: ethers.JsonRpcProvider;
   private broadcasterConnectionLogged = false;
+  // El motor de Railgun y su base de datos son globales al proceso: una segunda
+  // instancia no puede iniciarlos.
+  private static engineRunning = false;
   private skipScans: boolean;
 
   constructor(config: RailgunConfig, encryptionKey?: string) {
@@ -112,6 +119,11 @@ export class RailgunService {
     if (this.isInitialized) {
       console.log("Railgun ya está inicializado");
       return;
+    }
+    if (RailgunService.engineRunning) {
+      throw new Error(
+        "El motor de Railgun ya fue iniciado por otra instancia de RailgunService en este proceso."
+      );
     }
 
     const debug = this.config.debug ?? false;
@@ -208,7 +220,7 @@ export class RailgunService {
     );
 
     // 6. Cargar provider para la red configurada
-    const networkConfig = NETWORK_CONFIG[this.config.networkName];
+    const networkConfig = NETWORK_CONFIG[this.networkName];
     const chainId = networkConfig.chain.id;
 
     const fallbackConfig: FallbackProviderJsonConfig = {
@@ -223,11 +235,12 @@ export class RailgunService {
     };
 
     console.log(
-      `Cargando provider para ${this.config.networkName} (chainId: ${chainId})...`
+      `Cargando provider para ${this.networkName} (chainId: ${chainId})...`
     );
-    await loadProvider(fallbackConfig, this.config.networkName);
+    await loadProvider(fallbackConfig, this.networkName);
 
     this.isInitialized = true;
+    RailgunService.engineRunning = true;
     console.log("✓ Railgun Engine inicializado");
   }
 
@@ -249,6 +262,7 @@ export class RailgunService {
     } finally {
       await stopRailgunEngine();
       this.isInitialized = false;
+      RailgunService.engineRunning = false;
       console.log("✓ Railgun Engine detenido");
     }
   }
@@ -271,11 +285,11 @@ export class RailgunService {
 
     // Empezar a scanear desde 100 bloques atrás (~3 min en Polygon)
     const creationBlockNumbers: { [key: string]: number } = {
-      [this.config.networkName]: Math.max(0, currentBlock - 100),
+      [this.networkName]: Math.max(0, currentBlock - 100),
     };
 
     console.log(
-      `Creando wallet Railgun (scan desde bloque ${creationBlockNumbers[this.config.networkName]})...`
+      `Creando wallet Railgun (scan desde bloque ${creationBlockNumbers[this.networkName]})...`
     );
     const walletResponse = await createRailgunWallet(
       this.encryptionKey,
@@ -382,8 +396,8 @@ export class RailgunService {
   /**
    * Obtiene el TXIDVersion apropiado para la red configurada
    */
-  getTxidVersion(): TXIDVersion {
-    const networkConfig = NETWORK_CONFIG[this.config.networkName];
+  private getTxidVersion(): TXIDVersion {
+    const networkConfig = NETWORK_CONFIG[this.networkName];
     return networkConfig.supportsV3
       ? TXIDVersion.V3_PoseidonMerkle
       : TXIDVersion.V2_PoseidonMerkle;
@@ -392,8 +406,8 @@ export class RailgunService {
   /**
    * Obtiene la Chain para la red configurada
    */
-  getChain(): Chain {
-    const networkConfig = NETWORK_CONFIG[this.config.networkName];
+  private getChain(): Chain {
+    const networkConfig = NETWORK_CONFIG[this.networkName];
     return { type: ChainType.EVM, id: networkConfig.chain.id };
   }
 
@@ -410,7 +424,7 @@ export class RailgunService {
     return balanceForERC20Token(
       txidVersion,
       wallet,
-      this.config.networkName,
+      this.networkName,
       tokenAddress,
       onlySpendable
     );
@@ -424,6 +438,9 @@ export class RailgunService {
     if (!this.walletInfo) throw new Error("No hay wallet cargada");
 
     const chain = this.getChain();
+    // Una nota recibida hereda la validación de las que la originaron, pero el
+    // cliente no la considera gastable hasta consultar su estado.
+    await refreshReceivePOIsForWallet(this.getTxidVersion(), this.networkName, this.walletInfo.id);
     await refreshBalances(chain, [this.walletInfo.id]);
   }
 
@@ -459,7 +476,7 @@ export class RailgunService {
     if (!this.walletInfo) throw new Error("No hay wallet cargada");
 
     const txidVersion = this.getTxidVersion();
-    const networkConfig = NETWORK_CONFIG[this.config.networkName];
+    const networkConfig = NETWORK_CONFIG[this.networkName];
 
     // 1. Derivar shield private key (firmar mensaje y usar hash como clave)
     const signatureMessage = getShieldPrivateKeySignatureMessage();
@@ -504,7 +521,7 @@ export class RailgunService {
     console.log("Estimando gas para shield...");
     const gasEstimate = await gasEstimateForShield(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       shieldPrivateKey,
       erc20AmountRecipients,
       [],
@@ -524,7 +541,7 @@ export class RailgunService {
     console.log("Generando transacción de shield...");
     const shieldResponse = await populateShield(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       shieldPrivateKey,
       erc20AmountRecipients,
       [],
@@ -548,11 +565,11 @@ export class RailgunService {
    * Genera las Pruebas de Inocencia de las notas propias que las necesitan, para
    * que el vuelto de una operación privada vuelva a ser gastable.
    */
-  async unlockChangeNotes(): Promise<void> {
+  private async unlockChangeNotes(): Promise<void> {
     if (!this.walletInfo) return;
     try {
       await refreshBalances(this.getChain(), [this.walletInfo.id]);
-      await generatePOIsForWallet(this.config.networkName, this.walletInfo.id);
+      await generatePOIsForWallet(this.networkName, this.walletInfo.id);
       await refreshBalances(this.getChain(), [this.walletInfo.id]);
     } catch (e: any) {
       // No es fatal: la operación ya se confirmó. El vuelto se habilitará cuando
@@ -570,7 +587,7 @@ export class RailgunService {
    * fondos ---la prueba fija destino y monto--- de modo que el riesgo se limita a
    * un sobreprecio, comparable antes de generar la prueba.
    */
-  async findBroadcaster(
+  private async findBroadcaster(
     tokenAddress: string,
     timeoutMs: number = 60_000,
     useRelayAdapt: boolean = false
@@ -648,7 +665,7 @@ export class RailgunService {
       feePerUnitGas: BigInt(broadcaster.tokenFee.feePerUnitGas),
     };
 
-    const evmGasType = getEVMGasTypeForTransaction(this.config.networkName, false);
+    const evmGasType = getEVMGasTypeForTransaction(this.networkName, false);
     const feeData = await this.provider.getFeeData();
     const gasPrice = feeData.gasPrice ?? 30_000_000_000n;
 
@@ -665,7 +682,7 @@ export class RailgunService {
     console.log("Estimando gas de la invocación envuelta...");
     const gasEstimateResponse = await gasEstimateForUnprovenCrossContractCalls(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       this.walletInfo.id,
       this.encryptionKey,
       [], // no se desblinda nada: la invocación no mueve fondos
@@ -712,7 +729,7 @@ export class RailgunService {
     const t0 = Date.now();
     await generateCrossContractCallsProof(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       this.walletInfo.id,
       this.encryptionKey,
       [],
@@ -733,7 +750,7 @@ export class RailgunService {
 
     const populated = await populateProvedCrossContractCalls(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       this.walletInfo.id,
       [],
       [],
@@ -819,7 +836,7 @@ export class RailgunService {
     // Con retransmisor el protocolo exige transacciones de tipo 1: la prueba se
     // compromete a un precio de gas único (overallBatchMinGasPrice), que el
     // esquema de tarifa variable del tipo 2 no permite fijar.
-    const evmGasType = getEVMGasTypeForTransaction(this.config.networkName, false);
+    const evmGasType = getEVMGasTypeForTransaction(this.networkName, false);
     const feeData = await this.provider.getFeeData();
     const gasPrice = feeData.gasPrice ?? 30_000_000_000n;
 
@@ -832,7 +849,7 @@ export class RailgunService {
     console.log("Estimando gas para transferencia privada...");
     const gasEstimateResponse = await gasEstimateForUnprovenTransfer(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       this.walletInfo.id,
       this.encryptionKey,
       undefined,
@@ -907,7 +924,7 @@ export class RailgunService {
     const t0 = Date.now();
     await generateTransferProof(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       this.walletInfo.id,
       this.encryptionKey,
       false,
@@ -926,7 +943,7 @@ export class RailgunService {
 
     const transferResponse = await populateProvedTransfer(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       this.walletInfo.id,
       false,
       undefined,
@@ -991,7 +1008,7 @@ export class RailgunService {
     tokenAddress: string,
     amount: bigint,
     recipientRailgunAddress: string,
-    sendingWallet: ethers.Wallet
+    sendingWallet: ethers.Signer
   ): Promise<string> {
     this.ensureInitialized();
     if (!this.walletInfo) throw new Error("No hay wallet cargada");
@@ -1026,7 +1043,7 @@ export class RailgunService {
     console.log("Estimando gas para transferencia privada...");
     const gasEstimateResponse = await gasEstimateForUnprovenTransfer(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       this.walletInfo.id,
       this.encryptionKey,
       undefined, // memoText
@@ -1052,7 +1069,7 @@ export class RailgunService {
 
     await generateTransferProof(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       this.walletInfo.id,
       this.encryptionKey,
       false,     // showSenderAddressToRecipient
@@ -1076,7 +1093,7 @@ export class RailgunService {
     console.log("Generando transacción con prueba...");
     const transferResponse = await populateProvedTransfer(
       txidVersion,
-      this.config.networkName,
+      this.networkName,
       this.walletInfo.id,
       false,     // showSenderAddressToRecipient
       undefined, // memoText
@@ -1090,7 +1107,7 @@ export class RailgunService {
 
     // 8. Validar con provider.call antes de enviar (no gasta gas)
     console.log("Validando transacción...");
-    const from = sendingWallet.address;
+    const from = await sendingWallet.getAddress();
     try {
       await this.provider.call({
         from,
@@ -1122,18 +1139,18 @@ export class RailgunService {
    * Obtiene el contrato proxy de Railgun para esta red
    */
   getRailgunProxyContract(): string {
-    return NETWORK_CONFIG[this.config.networkName]?.proxyContract || "";
+    return NETWORK_CONFIG[this.networkName]?.proxyContract || "";
   }
 
   /**
    * Obtiene información de la red configurada
    */
   getNetworkInfo(): {
-    name: NetworkName;
+    name: SupportedNetwork;
     chainId: number;
     proxyContract: string;
   } {
-    const config = NETWORK_CONFIG[this.config.networkName];
+    const config = NETWORK_CONFIG[this.networkName];
     return {
       name: this.config.networkName,
       chainId: config?.chain?.id || 0,
@@ -1142,6 +1159,11 @@ export class RailgunService {
   }
 
   // === Helpers privados ===
+
+  /** Traduce la red configurada al identificador del protocolo. */
+  private get networkName(): NetworkName {
+    return this.config.networkName as NetworkName;
+  }
 
   private ensureInitialized(): void {
     if (!this.isInitialized) {

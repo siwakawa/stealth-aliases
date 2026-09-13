@@ -7,11 +7,15 @@
  * Pruebas de Inocencia, cuya desaparición dejó fondos inmovilizados.
  *
  * No envía ninguna transacción ni gasta gas: solo se conecta, escucha y lista.
+ *
+ * Es un diagnóstico de la infraestructura de terceros, no un cliente del
+ * sistema: por eso habla directamente con la red Waku en lugar de pasar por
+ * RailgunService.
  * Así se midió la oferta en Polygon: un único retransmisor para USDC nativo
  * frente a más de diez para USDC.e.
  *
  * Uso:
- *   ts-node src/examples/sondear-retransmisores.ts
+ *   ts-node src/diagnostico/sondear-retransmisores.ts
  *
  * Nota sobre módulos: el paquete es ESM puro y el SDK compila a CommonJS. Node
  * >= 22.12 resuelve el `require()` de un grafo ESM sin await de nivel superior,
@@ -108,9 +112,8 @@ async function main() {
       "\n  No apareció ningún retransmisor para USDC en Polygon dentro de la ventana."
     );
     console.log(
-      "    Sin retransmisor disponible, la transferencia debe emitirse desde la"
+      "    Sin retransmisor disponible, solo queda la vía directa, desde la billetera pública."
     );
-    console.log("    billetera pública, que es lo que hace la demostración actual.");
   }
 
   await WakuBroadcasterClient.stop();

@@ -2,30 +2,38 @@ import { ethers, type ContractTransaction } from "ethers";
 import type { RailgunService } from "./railgun/RailgunService";
 
 /**
- * Canal por el que una invocación preparada llega a la cadena.
+ * Vía por la que una operación del usuario llega a la cadena.
  *
- * Realiza el patrón estrategia: quien registra un alias programa contra esta
- * interfaz y elige la realización sin que su lógica cambie. El secreto de cada
- * realización es el mecanismo de entrega y, con él, si el origen de quien
- * invoca queda expuesto.
+ * Es la estrategia del patrón homónimo. Sus realizaciones deciden quién firma y
+ * paga cada operación y, con ello, si el origen queda expuesto. Quien la usa
+ * ---el contexto, `AliasApp`--- delega en ella sin saber cuál recibió.
  *
- * Las dos vías pagan de maneras incompatibles ---una con gas desde una billetera
- * pública, otra con una comisión en fondos blindados---. Para que `send` tenga la
- * misma firma en ambas, la fuente de pago se fija al construir cada canal y no
- * viaja con la invocación.
+ * Las dos vías pagan de maneras incompatibles: una con gas desde una billetera
+ * pública, otra con una comisión en fondos blindados. Para que las firmas sean
+ * idénticas, la fuente de pago se fija al construir cada canal y no viaja con
+ * las operaciones.
  */
 export interface SendChannel {
-  /** Entrega la invocación y devuelve el hash de la transacción confirmada. */
+  /** Entrega una invocación preparada, como un registro de alias. */
   send(preparedCall: ContractTransaction): Promise<string>;
+
+  /** Transfiere fondos blindados a una dirección privada dentro de la reserva. */
+  transfer(token: string, amount: bigint, recipient: string): Promise<string>;
 }
 
+/** Vías que el usuario puede elegir. */
+export type Via = "direct" | "private";
+
 /**
- * Vía directa: firma y publica la invocación desde la billetera del registrante.
- * Su dirección queda en la cadena como emisor de la transacción y, en el caso de
- * un registro, como `registrant` del evento.
+ * Vía directa: la billetera pública del usuario firma y paga el gas.
+ * Su dirección queda en la cadena como emisor de cada transacción y, en un
+ * registro, como `registrant` del evento.
  */
 export class DirectChannel implements SendChannel {
-  constructor(private readonly signer: ethers.Signer) {}
+  constructor(
+    private readonly railgun: RailgunService,
+    private readonly signer: ethers.Signer
+  ) {}
 
   async send(preparedCall: ContractTransaction): Promise<string> {
     const tx = await this.signer.sendTransaction(preparedCall);
@@ -35,29 +43,61 @@ export class DirectChannel implements SendChannel {
     }
     return tx.hash;
   }
+
+  transfer(token: string, amount: bigint, recipient: string): Promise<string> {
+    return this.railgun.privateTransfer(token, amount, recipient, this.signer);
+  }
 }
 
 /**
- * Vía privada: envuelve la invocación en una llamada del contrato Relay Adapt y
- * la entrega a un retransmisor. El contrato de destino observa como `msg.sender`
- * la dirección de Relay Adapt, y quien firma es el retransmisor: ninguna
- * billetera del registrante aparece en la cadena.
+ * Vía privada: un retransmisor firma y publica, y cobra una comisión en fondos
+ * blindados. Un registro viaja envuelto en una llamada del contrato Relay Adapt,
+ * que es lo que el contrato de destino observa como `msg.sender`; una
+ * transferencia no necesita envoltura. Ninguna billetera del usuario aparece en
+ * la cadena.
  *
- * Paga con una comisión en fondos blindados de la billetera cargada en el
- * servicio, en el token indicado.
+ * La comisión de un registro se paga en `feeToken`; la de una transferencia, en
+ * el mismo token que se transfiere. `maxFee` acota ambas.
  */
-export class RelayAdaptChannel implements SendChannel {
+export class PrivateChannel implements SendChannel {
   constructor(
     private readonly railgun: RailgunService,
-    private readonly feeTokenAddress: string,
+    private readonly feeToken: string,
     private readonly maxFee?: bigint
   ) {}
 
   send(preparedCall: ContractTransaction): Promise<string> {
-    return this.railgun.sendViaRelayAdapt(
-      preparedCall,
-      this.feeTokenAddress,
-      this.maxFee
-    );
+    return this.railgun.sendViaRelayAdapt(preparedCall, this.feeToken, this.maxFee);
+  }
+
+  transfer(token: string, amount: bigint, recipient: string): Promise<string> {
+    return this.railgun.privateTransferViaBroadcaster(token, amount, recipient, this.maxFee);
+  }
+}
+
+export interface ChannelOptions {
+  railgun: RailgunService;
+  /** Billetera pública; la vía directa la exige. */
+  signer?: ethers.Signer;
+  /** Token de la comisión de los registros por la vía privada. */
+  feeToken: string;
+  maxFee?: bigint;
+}
+
+/**
+ * Construye el canal que corresponde a la vía elegida.
+ *
+ * Es el único punto donde se decide entre las dos realizaciones: de aquí en
+ * adelante, el contexto trabaja contra `SendChannel`.
+ */
+export function createChannel(via: Via, options: ChannelOptions): SendChannel {
+  switch (via) {
+    case "direct":
+      if (!options.signer) {
+        throw new Error("La vía directa necesita una billetera pública que firme y pague el gas.");
+      }
+      return new DirectChannel(options.railgun, options.signer);
+    case "private":
+      return new PrivateChannel(options.railgun, options.feeToken, options.maxFee);
   }
 }

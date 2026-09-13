@@ -15,20 +15,23 @@
  * 6. El receptor verifica su balance
  *
  * Uso:
- *   ts-node src/examples/railgun-demo.ts               # solo registro de aliases
- *   ts-node src/examples/railgun-demo.ts --shield       # + blindaje de USDC
- *   ts-node src/examples/railgun-demo.ts --shield --transfer  # flujo completo
+ *   ts-node src/examples/railgun-demo.ts                        # solo registro de aliases
+ *   ts-node src/examples/railgun-demo.ts --shield                # + blindaje de USDC
+ *   ts-node src/examples/railgun-demo.ts --shield --transfer     # flujo completo
+ *   ts-node src/examples/railgun-demo.ts --transfer --via privada  # por retransmisor
+ *
+ * `--via` elige el canal (directa por omisión). Registro y transferencia se
+ * delegan en AliasApp, que opera contra el canal sin saber cuál es.
  */
 
 import { ethers } from "ethers";
 import { config } from "dotenv";
-import { NetworkName } from "@railgun-community/shared-models";
 import * as path from "path";
 
+import { AliasApp } from "../AliasApp";
 import { AliasRegistryClient } from "../AliasRegistryClient";
 import { RailgunService } from "../railgun/RailgunService";
-import { DirectChannel } from "../SendChannel";
-import { generateStealthMetaAddress } from "../StealthAddress";
+import { createChannel, type Via } from "../SendChannel";
 
 config({ path: path.join(__dirname, "../../../contracts/.env") });
 
@@ -45,6 +48,8 @@ const ALIAS_B = process.env.ALIAS_B || "bob";
 
 // USDC en Polygon (6 decimales)
 const USDC_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+// Tope de comisión aceptado por la vía privada: 0,2 USDC
+const MAX_FEE = 200_000n;
 
 // Directorio para datos persistentes de Railgun
 const DATA_DIR =
@@ -110,10 +115,13 @@ async function main() {
   const args = process.argv.slice(2);
   const doShield = args.includes("--shield");
   const doTransfer = args.includes("--transfer");
-  // Con --broadcaster la transferencia se entrega a un retransmisor en lugar de
-  // emitirse desde la billetera pública: el gas lo adelanta él y se cobra dentro
-  // de la reserva, de modo que la dirección de la emisora no aparece en la cadena.
-  const viaBroadcaster = args.includes("--broadcaster");
+  // --via privada entrega las operaciones a un retransmisor en lugar de emitirlas
+  // desde la billetera pública: el gas lo adelanta él y se cobra dentro de la
+  // reserva, de modo que la dirección del participante no aparece en la cadena.
+  const viaArg = args.includes("--via") ? args[args.indexOf("--via") + 1] : "directa";
+  const vias: Record<string, Via> = { directa: "direct", privada: "private" };
+  const via = vias[viaArg];
+  if (!via) throw new Error(`Vía desconocida: ${viaArg} (directa|privada)`);
 
   // Resultado real de cada etapa: el resumen final informa lo que ocurrió,
   // no lo que se pidió por línea de comandos.
@@ -141,24 +149,31 @@ async function main() {
   console.log(`Red: Polygon (chainId: ${network.chainId})`);
   console.log(`Wallet pública de ${ALIAS_A}: ${signer.address}`);
 
-  // Registry con signer para poder registrar
-  const registry = new AliasRegistryClient(signer);
+  const registry = new AliasRegistryClient(provider);
 
   // El receptor usa su propia billetera para registrar su alias. Si ambos
   // registros salieran de la misma dirección, un observador podría vincular la
   // transferencia con los dos aliases desde un explorador de bloques.
   const signerB = new ethers.Wallet(PRIVATE_KEY_B, provider);
-  const registryB = new AliasRegistryClient(signerB);
   console.log(`Wallet pública de ${ALIAS_B}: ${signerB.address}`);
   console.log(`AliasRegistry: ${registry.getContractAddress()}\n`);
 
   // Railgun service
   const railgun = new RailgunService({
-    networkName: NetworkName.Polygon,
+    networkName: "Polygon",
     rpcUrl: RPC_URL,
     dataDir: DATA_DIR,
     debug: false,
   });
+
+  // Cada participante opera con su propia billetera pública; el canal que se
+  // construye depende solo de la vía elegida.
+  const appFor = (participantSigner: ethers.Wallet) =>
+    new AliasApp(
+      registry,
+      railgun,
+      createChannel(via, { railgun, signer: participantSigner, feeToken: USDC_ADDRESS, maxFee: MAX_FEE })
+    );
 
   try {
     await railgun.initialize();
@@ -185,11 +200,9 @@ async function main() {
     // ya lo hizo: que pague desde la dirección que registró su alias es el
     // comportamiento esperado, y su participación es visible igual porque paga el gas.
     if (!(await registry.isRegistered(ALIAS_A))) {
-      console.log(`Registrando @${ALIAS_A} desde ${signer.address}...`);
-      const keysA = generateStealthMetaAddress();
-      const hash = await new DirectChannel(signer).send(
-        await registry.populateRegister(ALIAS_A, keysA.metaAddress, walletA.railgunAddress)
-      );
+      console.log(`Registrando @${ALIAS_A} (vía ${viaArg})...`);
+      await railgun.getOrCreateWallet(MNEMONIC_A, ALIAS_A);
+      const hash = await appFor(signer).registerAlias(ALIAS_A);
       console.log(`  ✓ @${ALIAS_A} registrada (tx: ${hash})`);
     } else {
       const registeredAddressA = await registry.resolveRailgun(ALIAS_A);
@@ -205,15 +218,13 @@ async function main() {
     // El receptor registra el suyo desde SU billetera. Este es el punto del
     // cambio: si ambos registros salieran de la misma dirección, un observador
     // podría vincular la transferencia con los dos aliases.
-    if (!(await registryB.isRegistered(ALIAS_B))) {
-      console.log(`Registrando @${ALIAS_B} desde ${signerB.address}...`);
-      const keysB = generateStealthMetaAddress();
-      const hash = await new DirectChannel(signerB).send(
-        await registryB.populateRegister(ALIAS_B, keysB.metaAddress, walletB.railgunAddress)
-      );
+    if (!(await registry.isRegistered(ALIAS_B))) {
+      console.log(`Registrando @${ALIAS_B} (vía ${viaArg})...`);
+      await railgun.getOrCreateWallet(MNEMONIC_B, ALIAS_B);
+      const hash = await appFor(signerB).registerAlias(ALIAS_B);
       console.log(`  ✓ @${ALIAS_B} registrado (tx: ${hash})`);
     } else {
-      const registeredAddressB = await registryB.resolveRailgun(ALIAS_B);
+      const registeredAddressB = await registry.resolveRailgun(ALIAS_B);
       if (registeredAddressB !== walletB.railgunAddress) {
         throw new Error(
           `@${ALIAS_B} ya está tomado y apunta a otra dirección Railgun. ` +
@@ -319,7 +330,7 @@ async function main() {
       // Con retransmisor la comisión sale del mismo saldo blindado, así que se
       // espera un margen por encima del monto. El servicio verifica el importe
       // exacto una vez que conoce la cotización.
-      const minimoRequerido = viaBroadcaster ? transferAmount * 10n : transferAmount;
+      const minimoRequerido = via === "private" ? transferAmount * 10n : transferAmount;
       const currentBalance = await waitForSpendableBalance(
         railgun,
         MNEMONIC_A,
@@ -332,24 +343,9 @@ async function main() {
       if (currentBalance >= minimoRequerido) {
         console.log(`  Transfiriendo ${ethers.formatUnits(transferAmount, 6)} USDC a @${ALIAS_B}...\n`);
 
-        // 3. Transferencia privada (genera ZK-proof)
-        const txHash = await timed(
-          viaBroadcaster
-            ? "transferencia completa vía retransmisor"
-            : "prueba de conocimiento cero y envío de la transferencia",
-          () =>
-            viaBroadcaster
-              ? railgun.privateTransferViaBroadcaster(
-                  USDC_ADDRESS,
-                  transferAmount,
-                  railgunAddressB
-                )
-              : railgun.privateTransfer(
-                  USDC_ADDRESS,
-                  transferAmount,
-                  railgunAddressB,
-                  signer
-                )
+        // 3. Transferencia privada (genera ZK-proof), por el canal elegido
+        const txHash = await timed(`transferencia completa (vía ${viaArg})`, () =>
+          appFor(signer).sendToAlias(ALIAS_B, USDC_ADDRESS, transferAmount)
         );
         console.log(`\n  ✓ Transferencia completada: ${txHash}`);
         transferOk = true;
