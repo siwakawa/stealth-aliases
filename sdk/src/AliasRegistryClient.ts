@@ -67,6 +67,32 @@ export class AliasRegistryClient {
   }
 
   /**
+   * Prepara la invocación de registro sin enviarla.
+   *
+   * Devuelve la llamada lista para entregar a un canal de envío: la vía directa
+   * la firma y publica desde la billetera del registrante, mientras que la vía
+   * privada la envuelve en una llamada de Relay Adapt. El contrato ejecuta la
+   * misma operación en ambos casos; lo que cambia es qué puede observar un
+   * tercero sobre quién la originó.
+   */
+  async populateRegister(
+    alias: string,
+    stealthMetaAddress: Uint8Array | string,
+    railgunAddress: string
+  ): Promise<ethers.ContractTransaction> {
+    const metaBytes =
+      typeof stealthMetaAddress === "string"
+        ? stealthMetaAddress
+        : ethers.hexlify(stealthMetaAddress);
+
+    return this.contract.register.populateTransaction(
+      alias,
+      metaBytes,
+      railgunAddress
+    );
+  }
+
+  /**
    * Resuelve un alias a su stealth meta-address y dirección Railgun
    */
   async resolve(alias: string): Promise<{ stealthMetaAddress: string; railgunAddress: string }> {

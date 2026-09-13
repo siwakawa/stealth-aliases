@@ -21,8 +21,12 @@ import {
   generateTransferProof,
   populateProvedTransfer,
   gasEstimateForUnprovenTransfer,
+  generateCrossContractCallsProof,
+  populateProvedCrossContractCalls,
+  gasEstimateForUnprovenCrossContractCalls,
   balanceForERC20Token,
   refreshBalances,
+  generatePOIsForWallet,
   calculateBroadcasterFeeERC20Amount,
   ArtifactStore,
 } from "@railgun-community/wallet";
@@ -50,7 +54,7 @@ import {
   BroadcasterTransaction,
 } from "@railgun-community/waku-broadcaster-client-node";
 
-import { ethers } from "ethers";
+import { ethers, type ContractTransaction } from "ethers";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -539,6 +543,24 @@ export class RailgunService {
   }
 
 
+
+  /**
+   * Genera las Pruebas de Inocencia de las notas propias que las necesitan, para
+   * que el vuelto de una operación privada vuelva a ser gastable.
+   */
+  async unlockChangeNotes(): Promise<void> {
+    if (!this.walletInfo) return;
+    try {
+      await refreshBalances(this.getChain(), [this.walletInfo.id]);
+      await generatePOIsForWallet(this.config.networkName, this.walletInfo.id);
+      await refreshBalances(this.getChain(), [this.walletInfo.id]);
+    } catch (e: any) {
+      // No es fatal: la operación ya se confirmó. El vuelto se habilitará cuando
+      // se generen las pruebas en una sesión posterior.
+      console.warn(`⚠ No se pudieron generar las pruebas del vuelto: ${e.message}`);
+    }
+  }
+
   /**
    * Conecta a la red de retransmisores y devuelve el mejor disponible para un token.
    *
@@ -550,7 +572,8 @@ export class RailgunService {
    */
   async findBroadcaster(
     tokenAddress: string,
-    timeoutMs: number = 60_000
+    timeoutMs: number = 60_000,
+    useRelayAdapt: boolean = false
   ): Promise<SelectedBroadcaster> {
     const chain = this.getChain();
 
@@ -573,7 +596,7 @@ export class RailgunService {
       const elegido = WakuBroadcasterClient.findBestBroadcaster(
         chain,
         tokenAddress,
-        false
+        useRelayAdapt
       );
       if (elegido) {
         console.log(`✓ Retransmisor: ${elegido.railgunAddress.slice(0, 30)}...`);
@@ -587,6 +610,176 @@ export class RailgunService {
       `No se encontró ningún retransmisor para ${tokenAddress} en ${timeoutMs / 1000} s. ` +
         `Sin retransmisor la transferencia debe emitirse desde la billetera pública.`
     );
+  }
+
+
+  /**
+   * Entrega a la cadena una invocación ya preparada, a través de Relay Adapt y
+   * de un retransmisor.
+   *
+   * Realiza la vía privada del canal de envío: el contrato de destino observa
+   * como `msg.sender` la dirección del contrato Relay Adapt, no la del usuario,
+   * y quien firma y publica la transacción es el retransmisor. Ninguna billetera
+   * del usuario aparece en la cadena.
+   *
+   * @param preparedCall - Invocación lista para enviar (destino y datos)
+   * @param feeTokenAddress - Token con el que se paga al retransmisor
+   * @param maxFee - Comisión máxima aceptada, en unidades mínimas del token
+   */
+  async sendViaRelayAdapt(
+    preparedCall: ContractTransaction,
+    feeTokenAddress: string,
+    maxFee?: bigint
+  ): Promise<string> {
+    this.ensureInitialized();
+    if (!this.walletInfo) throw new Error("No hay wallet cargada");
+
+    const txidVersion = this.getTxidVersion();
+    const chain = this.getChain();
+
+    await refreshBalances(chain, [this.walletInfo.id]);
+
+    // El retransmisor debe declarar soporte de Relay Adapt: es él quien invoca
+    // ese contrato, y no todos lo ofrecen.
+    const broadcaster = await this.findBroadcaster(feeTokenAddress, 60_000, true);
+
+    const feeTokenDetails: FeeTokenDetails = {
+      tokenAddress: broadcaster.tokenAddress,
+      feePerUnitGas: BigInt(broadcaster.tokenFee.feePerUnitGas),
+    };
+
+    const evmGasType = getEVMGasTypeForTransaction(this.config.networkName, false);
+    const feeData = await this.provider.getFeeData();
+    const gasPrice = feeData.gasPrice ?? 30_000_000_000n;
+
+    // Relay Adapt ejecuta la invocación envuelta dentro de su propia
+    // transacción, de modo que el límite debe cubrir ambas.
+    const minGasLimit = 3_000_000n;
+
+    const originalGasDetails = {
+      evmGasType,
+      gasEstimate: minGasLimit,
+      gasPrice,
+    } as TransactionGasDetails;
+
+    console.log("Estimando gas de la invocación envuelta...");
+    const gasEstimateResponse = await gasEstimateForUnprovenCrossContractCalls(
+      txidVersion,
+      this.config.networkName,
+      this.walletInfo.id,
+      this.encryptionKey,
+      [], // no se desblinda nada: la invocación no mueve fondos
+      [],
+      [], // ni se vuelve a blindar
+      [],
+      [preparedCall],
+      originalGasDetails,
+      feeTokenDetails,
+      false, // sendWithPublicWallet
+      minGasLimit
+    );
+
+    const transactionGasDetails = {
+      evmGasType,
+      gasEstimate: gasEstimateResponse.gasEstimate,
+      gasPrice,
+    } as TransactionGasDetails;
+
+    const fee = calculateBroadcasterFeeERC20Amount(feeTokenDetails, transactionGasDetails);
+    console.log(`  comisión del retransmisor: ${ethers.formatUnits(fee.amount, 6)}`);
+
+    if (maxFee !== undefined && fee.amount > maxFee) {
+      throw new Error(
+        `La comisión (${ethers.formatUnits(fee.amount, 6)}) supera el máximo aceptado ` +
+          `(${ethers.formatUnits(maxFee, 6)}). No se envía.`
+      );
+    }
+    const spendable = await this.getBalance(feeTokenAddress, true);
+    if (spendable < fee.amount) {
+      throw new Error(
+        `Saldo gastable insuficiente para la comisión: hay ` +
+          `${ethers.formatUnits(spendable, 6)} y se necesitan ${ethers.formatUnits(fee.amount, 6)}.`
+      );
+    }
+
+    const broadcasterFeeERC20AmountRecipient: RailgunERC20AmountRecipient = {
+      tokenAddress: fee.tokenAddress,
+      amount: fee.amount,
+      recipientAddress: broadcaster.railgunAddress,
+    };
+
+    console.log("Generando prueba ZK...");
+    const t0 = Date.now();
+    await generateCrossContractCallsProof(
+      txidVersion,
+      this.config.networkName,
+      this.walletInfo.id,
+      this.encryptionKey,
+      [],
+      [],
+      [],
+      [],
+      [preparedCall],
+      broadcasterFeeERC20AmountRecipient,
+      false,
+      gasPrice,
+      minGasLimit,
+      (progress: number, status: string) => {
+        process.stdout.write(`\r  Prueba ZK: ${(progress * 100).toFixed(0)}% - ${status}`);
+      }
+    );
+    console.log("");
+    console.log(`✓ Prueba ZK generada en ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
+    const populated = await populateProvedCrossContractCalls(
+      txidVersion,
+      this.config.networkName,
+      this.walletInfo.id,
+      [],
+      [],
+      [],
+      [],
+      [preparedCall],
+      broadcasterFeeERC20AmountRecipient,
+      false,
+      gasPrice,
+      transactionGasDetails
+    );
+
+    console.log("Entregando la invocación al retransmisor...");
+    const broadcasterTx = await BroadcasterTransaction.create(
+      txidVersion,
+      populated.transaction.to as string,
+      populated.transaction.data as string,
+      broadcaster.railgunAddress,
+      broadcaster.tokenFee.feesID,
+      chain,
+      populated.nullifiers ?? [],
+      gasPrice,
+      true, // useRelayAdapt
+      populated.preTransactionPOIsPerTxidLeafPerList ?? {}
+    );
+
+    const hash = await broadcasterTx.send();
+    console.log(`✓ Publicada por el retransmisor: ${hash}`);
+
+    console.log("Esperando confirmación en cadena...");
+    const receipt = await this.provider.waitForTransaction(hash, 1, 180_000);
+    if (!receipt) {
+      throw new Error(`La transacción ${hash} no se confirmó en 180 s.`);
+    }
+    if (receipt.status !== 1) {
+      throw new Error(`La transacción ${hash} revirtió en cadena.`);
+    }
+    console.log(`✓ Confirmada en el bloque ${receipt.blockNumber}`);
+
+    // Gastar una nota devuelve el resto como una nota nueva, y esa nota no es
+    // gastable hasta tener su Prueba de Inocencia. A diferencia de un blindaje,
+    // cuya validación decide el proveedor de listas, la de una nota surgida de una
+    // transferencia la genera el propio cliente: sin este paso el vuelto queda
+    // inmovilizado hasta que alguien la solicite.
+    await this.unlockChangeNotes();
+    return hash;
   }
 
   /**
@@ -776,6 +969,13 @@ export class RailgunService {
       throw new Error(`La transacción ${hash} revirtió en cadena.`);
     }
     console.log(`✓ Confirmada en el bloque ${receipt.blockNumber}`);
+
+    // Gastar una nota devuelve el resto como una nota nueva, y esa nota no es
+    // gastable hasta tener su Prueba de Inocencia. A diferencia de un blindaje,
+    // cuya validación decide el proveedor de listas, la de una nota surgida de una
+    // transferencia la genera el propio cliente: sin este paso el vuelto queda
+    // inmovilizado hasta que alguien la solicite.
+    await this.unlockChangeNotes();
     return hash;
   }
 
