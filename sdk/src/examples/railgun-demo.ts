@@ -18,9 +18,9 @@
  *   ts-node src/examples/railgun-demo.ts                        # solo registro de aliases
  *   ts-node src/examples/railgun-demo.ts --shield                # + blindaje de USDC
  *   ts-node src/examples/railgun-demo.ts --shield --transfer     # flujo completo
- *   ts-node src/examples/railgun-demo.ts --transfer --via privada  # por retransmisor
+ *   ts-node src/examples/railgun-demo.ts --transfer --via private  # por retransmisor
  *
- * `--via` elige el canal (directa por omisión). Registro y transferencia se
+ * `--via` elige el canal (direct por omisión). Registro y transferencia se
  * delegan en AliasApp, que opera contra el canal sin saber cuál es.
  */
 
@@ -115,13 +115,13 @@ async function main() {
   const args = process.argv.slice(2);
   const doShield = args.includes("--shield");
   const doTransfer = args.includes("--transfer");
-  // --via privada entrega las operaciones a un retransmisor en lugar de emitirlas
+  // --via private entrega las operaciones a un retransmisor en lugar de emitirlas
   // desde la billetera pública: el gas lo adelanta él y se cobra dentro de la
   // reserva, de modo que la dirección del participante no aparece en la cadena.
-  const viaArg = args.includes("--via") ? args[args.indexOf("--via") + 1] : "directa";
-  const vias: Record<string, Via> = { directa: "direct", privada: "private" };
-  const via = vias[viaArg];
-  if (!via) throw new Error(`Vía desconocida: ${viaArg} (directa|privada)`);
+  const via = (args.includes("--via") ? args[args.indexOf("--via") + 1] : "direct") as Via;
+  if (via !== "direct" && via !== "private") {
+    throw new Error(`Vía desconocida: ${via} (direct|private)`);
+  }
 
   // Resultado real de cada etapa: el resumen final informa lo que ocurrió,
   // no lo que se pidió por línea de comandos.
@@ -200,7 +200,7 @@ async function main() {
     // ya lo hizo: que pague desde la dirección que registró su alias es el
     // comportamiento esperado, y su participación es visible igual porque paga el gas.
     if (!(await registry.isRegistered(ALIAS_A))) {
-      console.log(`Registrando @${ALIAS_A} (vía ${viaArg})...`);
+      console.log(`Registrando @${ALIAS_A} (vía ${via})...`);
       await railgun.getOrCreateWallet(MNEMONIC_A, ALIAS_A);
       const hash = await appFor(signer).registerAlias(ALIAS_A);
       console.log(`  ✓ @${ALIAS_A} registrada (tx: ${hash})`);
@@ -219,7 +219,7 @@ async function main() {
     // cambio: si ambos registros salieran de la misma dirección, un observador
     // podría vincular la transferencia con los dos aliases.
     if (!(await registry.isRegistered(ALIAS_B))) {
-      console.log(`Registrando @${ALIAS_B} (vía ${viaArg})...`);
+      console.log(`Registrando @${ALIAS_B} (vía ${via})...`);
       await railgun.getOrCreateWallet(MNEMONIC_B, ALIAS_B);
       const hash = await appFor(signerB).registerAlias(ALIAS_B);
       console.log(`  ✓ @${ALIAS_B} registrado (tx: ${hash})`);
@@ -344,7 +344,7 @@ async function main() {
         console.log(`  Transfiriendo ${ethers.formatUnits(transferAmount, 6)} USDC a @${ALIAS_B}...\n`);
 
         // 3. Transferencia privada (genera ZK-proof), por el canal elegido
-        const txHash = await timed(`transferencia completa (vía ${viaArg})`, () =>
+        const txHash = await timed(`transferencia completa (vía ${via})`, () =>
           appFor(signer).sendToAlias(ALIAS_B, USDC_ADDRESS, transferAmount)
         );
         console.log(`\n  ✓ Transferencia completada: ${txHash}`);

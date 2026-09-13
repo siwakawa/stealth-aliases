@@ -6,10 +6,10 @@
  * recibió: la elección se toma en un único lugar, `createChannel`.
  *
  * Uso:
- *   npm run alias -- registrar <alias>        --billetera <nombre> --via directa|privada
- *   npm run alias -- enviar <alias> <monto>   --billetera <nombre> --via directa|privada
- *   npm run alias -- blindar <monto>          --billetera <nombre>
- *   npm run alias -- saldo                    --billetera <nombre>
+ *   npm run alias -- register <alias>          --wallet <nombre> --via direct|private
+ *   npm run alias -- send <alias> <amount>     --wallet <nombre> --via direct|private
+ *   npm run alias -- shield <amount>           --wallet <nombre>
+ *   npm run alias -- balance                   --wallet <nombre>
  *
  * Billeteras, definidas en contracts/.env:
  *   alice      MNEMONIC_A y PRIVATE_KEY
@@ -41,7 +41,7 @@ const WALLETS: Record<string, { mnemonic: string; privateKey?: string }> = {
   incognito: { mnemonic: "MNEMONIC_INCOGNITO" },
 };
 
-const VIAS: Record<string, Via> = { directa: "direct", privada: "private" };
+const VIAS: Via[] = ["direct", "private"];
 
 function option(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -67,7 +67,7 @@ async function main() {
   const command = args[0];
   const rpcUrl = required(process.env.POLYGON_RPC, "POLYGON_RPC no configurado en .env");
 
-  const walletName = required(option(args, "billetera"), "Falta --billetera <alice|bob|incognito>");
+  const walletName = required(option(args, "wallet"), "Falta --wallet <alice|bob|incognito>");
   const profile = WALLETS[walletName];
   if (!profile) throw new Error(`Billetera desconocida: ${walletName}`);
   const mnemonic = required(process.env[profile.mnemonic], `${profile.mnemonic} no configurado en .env`);
@@ -83,30 +83,29 @@ async function main() {
     await railgun.getOrCreateWallet(mnemonic, walletName);
 
     switch (command) {
-      case "registrar":
-      case "enviar": {
-        const viaName = required(option(args, "via"), "Falta --via <directa|privada>");
-        const via = VIAS[viaName];
-        if (!via) throw new Error(`Vía desconocida: ${viaName}`);
+      case "register":
+      case "send": {
+        const via = required(option(args, "via"), "Falta --via <direct|private>") as Via;
+        if (!VIAS.includes(via)) throw new Error(`Vía desconocida: ${via} (direct|private)`);
 
         const channel = createChannel(via, { railgun, signer, feeToken: USDC, maxFee: MAX_FEE });
         const app = new AliasApp(new AliasRegistryClient(provider), railgun, channel);
 
         const t0 = Date.now();
         const hash =
-          command === "registrar"
+          command === "register"
             ? await app.registerAlias(required(args[1], "Falta el alias"))
             : await app.sendToAlias(
                 required(args[1], "Falta el alias"),
                 USDC,
                 ethers.parseUnits(required(args[2], "Falta el monto"), 6)
               );
-        console.log(`\n✓ ${command === "registrar" ? "Registrado" : "Enviado"} por la vía ${viaName}: ${hash}`);
+        console.log(`\n✓ ${command === "register" ? "Registrado" : "Enviado"} por la vía ${via}: ${hash}`);
         console.log(`  ⏱ ${((Date.now() - t0) / 1000).toFixed(1)} s`);
         break;
       }
 
-      case "blindar": {
+      case "shield": {
         // El blindaje es público por naturaleza: no hay vía que elegir.
         if (!signer) throw new Error(`La billetera ${walletName} no tiene billetera pública para blindar.`);
         const amount = ethers.parseUnits(required(args[1], "Falta el monto"), 6);
@@ -114,7 +113,7 @@ async function main() {
         break;
       }
 
-      case "saldo": {
+      case "balance": {
         await railgun.refreshWalletBalances();
         const total = await railgun.getBalance(USDC);
         const spendable = await railgun.getBalance(USDC, true);
@@ -123,7 +122,7 @@ async function main() {
       }
 
       default:
-        throw new Error("Comandos: registrar, enviar, blindar, saldo");
+        throw new Error("Comandos: register, send, shield, balance");
     }
   } finally {
     shuttingDown = true;
