@@ -23,6 +23,7 @@ import {
   gasEstimateForUnprovenTransfer,
   balanceForERC20Token,
   refreshBalances,
+  calculateBroadcasterFeeERC20Amount,
   ArtifactStore,
 } from "@railgun-community/wallet";
 
@@ -38,7 +39,16 @@ import {
   type RailgunWalletInfo,
   type Chain,
   ChainType,
+  getEVMGasTypeForTransaction,
+  BroadcasterConnectionStatus,
+  type FeeTokenDetails,
+  type SelectedBroadcaster,
 } from "@railgun-community/shared-models";
+
+import {
+  WakuBroadcasterClient,
+  BroadcasterTransaction,
+} from "@railgun-community/waku-broadcaster-client-node";
 
 import { ethers } from "ethers";
 import * as fs from "fs";
@@ -78,6 +88,7 @@ export class RailgunService {
   private walletInfo?: WalletInfo;
   private encryptionKey: string;
   private provider: ethers.JsonRpcProvider;
+  private broadcasterConnectionLogged = false;
   private skipScans: boolean;
 
   constructor(config: RailgunConfig, encryptionKey?: string) {
@@ -221,9 +232,21 @@ export class RailgunService {
    */
   async shutdown(): Promise<void> {
     if (!this.isInitialized) return;
-    await stopRailgunEngine();
-    this.isInitialized = false;
-    console.log("✓ Railgun Engine detenido");
+    // La red de retransmisores mantiene conexiones abiertas que sostienen vivo el
+    // bucle de eventos: sin cerrarla, el proceso no termina aunque el flujo haya
+    // concluido.
+    try {
+      if (WakuBroadcasterClient.isStarted()) {
+        await WakuBroadcasterClient.stop();
+        console.log("✓ Desconectado de la red de retransmisores");
+      }
+    } catch (e: any) {
+      console.warn(`⚠ No se pudo cerrar la red de retransmisores: ${e.message}`);
+    } finally {
+      await stopRailgunEngine();
+      this.isInitialized = false;
+      console.log("✓ Railgun Engine detenido");
+    }
   }
 
   /**
@@ -513,6 +536,247 @@ export class RailgunService {
     console.log(`✓ Shield confirmado en bloque ${receipt?.blockNumber}`);
 
     return tx.hash;
+  }
+
+
+  /**
+   * Conecta a la red de retransmisores y devuelve el mejor disponible para un token.
+   *
+   * Los retransmisores se anuncian por una red Waku; el descubrimiento es
+   * asincrónico y puede no arrojar ninguno. `trustedFeeSigner` vacío significa
+   * aceptar cotizaciones de cualquier operador: el retransmisor no puede desviar
+   * fondos ---la prueba fija destino y monto--- de modo que el riesgo se limita a
+   * un sobreprecio, comparable antes de generar la prueba.
+   */
+  async findBroadcaster(
+    tokenAddress: string,
+    timeoutMs: number = 60_000
+  ): Promise<SelectedBroadcaster> {
+    const chain = this.getChain();
+
+    if (!WakuBroadcasterClient.isStarted()) {
+      console.log("Conectando a la red de retransmisores...");
+      await WakuBroadcasterClient.start(
+        chain,
+        { trustedFeeSigner: "" },
+        (_chain: Chain, status: BroadcasterConnectionStatus) => {
+          if (status === BroadcasterConnectionStatus.Connected && !this.broadcasterConnectionLogged) {
+            this.broadcasterConnectionLogged = true;
+            console.log("✓ Conectado a la red de retransmisores");
+          }
+        }
+      );
+    }
+
+    const hasta = Date.now() + timeoutMs;
+    while (Date.now() < hasta) {
+      const elegido = WakuBroadcasterClient.findBestBroadcaster(
+        chain,
+        tokenAddress,
+        false
+      );
+      if (elegido) {
+        console.log(`✓ Retransmisor: ${elegido.railgunAddress.slice(0, 30)}...`);
+        console.log(`  comisión por unidad de gas: ${elegido.tokenFee.feePerUnitGas}`);
+        return elegido;
+      }
+      await new Promise((r) => setTimeout(r, 3_000));
+    }
+
+    throw new Error(
+      `No se encontró ningún retransmisor para ${tokenAddress} en ${timeoutMs / 1000} s. ` +
+        `Sin retransmisor la transferencia debe emitirse desde la billetera pública.`
+    );
+  }
+
+  /**
+   * Transferencia privada emitida a través de un retransmisor.
+   *
+   * A diferencia de privateTransfer, la transacción no la firma ni la publica el
+   * emisor: se la entrega cifrada a un retransmisor, que paga el gas en el token
+   * nativo y se cobra dentro de la reserva, en el token transferido. El emisor no
+   * necesita el token nativo y su dirección pública no aparece en la cadena.
+   */
+  async privateTransferViaBroadcaster(
+    tokenAddress: string,
+    amount: bigint,
+    recipientRailgunAddress: string,
+    maxFee?: bigint
+  ): Promise<string> {
+    this.ensureInitialized();
+    if (!this.walletInfo) throw new Error("No hay wallet cargada");
+
+    const txidVersion = this.getTxidVersion();
+    const chain = this.getChain();
+
+    console.log("Sincronizando estado antes del transfer...");
+    await refreshBalances(chain, [this.walletInfo.id]);
+
+    const broadcaster = await this.findBroadcaster(tokenAddress);
+
+    const erc20AmountRecipients: RailgunERC20AmountRecipient[] = [
+      { tokenAddress, amount, recipientAddress: recipientRailgunAddress },
+    ];
+
+    const feeTokenDetails: FeeTokenDetails = {
+      tokenAddress: broadcaster.tokenAddress,
+      feePerUnitGas: BigInt(broadcaster.tokenFee.feePerUnitGas),
+    };
+
+    // Con retransmisor el protocolo exige transacciones de tipo 1: la prueba se
+    // compromete a un precio de gas único (overallBatchMinGasPrice), que el
+    // esquema de tarifa variable del tipo 2 no permite fijar.
+    const evmGasType = getEVMGasTypeForTransaction(this.config.networkName, false);
+    const feeData = await this.provider.getFeeData();
+    const gasPrice = feeData.gasPrice ?? 30_000_000_000n;
+
+    const originalGasDetails = {
+      evmGasType,
+      gasEstimate: 2_000_000n,
+      gasPrice,
+    } as TransactionGasDetails;
+
+    console.log("Estimando gas para transferencia privada...");
+    const gasEstimateResponse = await gasEstimateForUnprovenTransfer(
+      txidVersion,
+      this.config.networkName,
+      this.walletInfo.id,
+      this.encryptionKey,
+      undefined,
+      erc20AmountRecipients,
+      [],
+      originalGasDetails,
+      feeTokenDetails,
+      false // sendWithPublicWallet
+    );
+
+    const transactionGasDetails = {
+      evmGasType,
+      gasEstimate: gasEstimateResponse.gasEstimate,
+      gasPrice,
+    } as TransactionGasDetails;
+
+    const fee = calculateBroadcasterFeeERC20Amount(
+      feeTokenDetails,
+      transactionGasDetails
+    );
+    console.log(
+      `  comisión del retransmisor: ${ethers.formatUnits(fee.amount, 6)} ` +
+        `(sobre un envío de ${ethers.formatUnits(amount, 6)})`
+    );
+
+    // La cotización proviene de un operador no autenticado, de modo que la
+    // comisión se valida antes de comprometerla en la prueba: una vez generada,
+    // el importe queda fijado dentro del lote.
+    if (maxFee !== undefined && fee.amount > maxFee) {
+      throw new Error(
+        `La comisión del retransmisor (${ethers.formatUnits(fee.amount, 6)}) supera ` +
+          `el máximo aceptado (${ethers.formatUnits(maxFee, 6)}). No se envía.`
+      );
+    }
+    if (fee.amount > amount) {
+      console.warn(
+        `⚠ La comisión (${ethers.formatUnits(fee.amount, 6)}) supera al monto ` +
+          `transferido: el costo de red no depende de cuánto se envíe.`
+      );
+    }
+
+    // La comisión se descuenta del mismo saldo blindado, de modo que hace falta
+    // cubrir monto y comisión juntos.
+    const spendable = await this.getBalance(tokenAddress, true);
+    if (spendable < amount + fee.amount) {
+      throw new Error(
+        `Saldo gastable insuficiente: hay ${ethers.formatUnits(spendable, 6)} y se ` +
+          `necesitan ${ethers.formatUnits(amount + fee.amount, 6)} ` +
+          `(${ethers.formatUnits(amount, 6)} de envío más la comisión).`
+      );
+    }
+
+    // Generar la prueba lleva varios segundos; si la cotización vence entre medio,
+    // el retransmisor la rechaza recién al recibirla.
+    const segundosDeVigencia = broadcaster.tokenFee.expiration - Date.now() / 1000;
+    if (segundosDeVigencia < 60) {
+      throw new Error(
+        `La cotización del retransmisor vence en ${Math.max(0, segundosDeVigencia).toFixed(0)} s, ` +
+          `margen insuficiente para generar la prueba. Reintentá.`
+      );
+    }
+
+    const broadcasterFeeERC20AmountRecipient: RailgunERC20AmountRecipient = {
+      tokenAddress: fee.tokenAddress,
+      amount: fee.amount,
+      recipientAddress: broadcaster.railgunAddress,
+    };
+
+    const overallBatchMinGasPrice = gasPrice;
+
+    console.log("Generando prueba ZK...");
+    const t0 = Date.now();
+    await generateTransferProof(
+      txidVersion,
+      this.config.networkName,
+      this.walletInfo.id,
+      this.encryptionKey,
+      false,
+      undefined,
+      erc20AmountRecipients,
+      [],
+      broadcasterFeeERC20AmountRecipient,
+      false, // sendWithPublicWallet
+      overallBatchMinGasPrice,
+      (progress: number, status: string) => {
+        process.stdout.write(`\r  Prueba ZK: ${(progress * 100).toFixed(0)}% - ${status}`);
+      }
+    );
+    console.log("");
+    console.log(`✓ Prueba ZK generada en ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
+    const transferResponse = await populateProvedTransfer(
+      txidVersion,
+      this.config.networkName,
+      this.walletInfo.id,
+      false,
+      undefined,
+      erc20AmountRecipients,
+      [],
+      broadcasterFeeERC20AmountRecipient,
+      false, // sendWithPublicWallet
+      overallBatchMinGasPrice,
+      transactionGasDetails
+    );
+
+    console.log("Entregando la transacción al retransmisor...");
+    const broadcasterTx = await BroadcasterTransaction.create(
+      txidVersion,
+      transferResponse.transaction.to as string,
+      transferResponse.transaction.data as string,
+      broadcaster.railgunAddress,
+      broadcaster.tokenFee.feesID,
+      chain,
+      transferResponse.nullifiers ?? [],
+      overallBatchMinGasPrice,
+      false, // useRelayAdapt
+      transferResponse.preTransactionPOIsPerTxidLeafPerList ?? {}
+    );
+
+    const hash = await broadcasterTx.send();
+    console.log(`✓ Publicada por el retransmisor: ${hash}`);
+
+    // El retransmisor devuelve el hash apenas la difunde; que haya quedado
+    // confirmada, y con éxito, es otra cosa.
+    console.log("Esperando confirmación en cadena...");
+    const receipt = await this.provider.waitForTransaction(hash, 1, 180_000);
+    if (!receipt) {
+      throw new Error(
+        `La transacción ${hash} no se confirmó en 180 s. Puede confirmarse más tarde: ` +
+          `verificá en un explorador antes de reintentar, para no gastar dos veces.`
+      );
+    }
+    if (receipt.status !== 1) {
+      throw new Error(`La transacción ${hash} revirtió en cadena.`);
+    }
+    console.log(`✓ Confirmada en el bloque ${receipt.blockNumber}`);
+    return hash;
   }
 
   /**

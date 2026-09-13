@@ -109,6 +109,10 @@ async function main() {
   const args = process.argv.slice(2);
   const doShield = args.includes("--shield");
   const doTransfer = args.includes("--transfer");
+  // Con --broadcaster la transferencia se entrega a un retransmisor en lugar de
+  // emitirse desde la billetera pública: el gas lo adelanta él y se cobra dentro
+  // de la reserva, de modo que la dirección de la emisora no aparece en la cadena.
+  const viaBroadcaster = args.includes("--broadcaster");
 
   // Resultado real de cada etapa: el resumen final informa lo que ocurrió,
   // no lo que se pidió por línea de comandos.
@@ -317,28 +321,40 @@ async function main() {
       const totalBalance = await railgun.getBalance(USDC_ADDRESS);
       console.log(`  Balance privado de ${ALIAS_A}: ${ethers.formatUnits(totalBalance, 6)} USDC (total)`);
 
+      // Con retransmisor la comisión sale del mismo saldo blindado, así que se
+      // espera un margen por encima del monto. El servicio verifica el importe
+      // exacto una vez que conoce la cotización.
+      const minimoRequerido = viaBroadcaster ? transferAmount * 10n : transferAmount;
       const currentBalance = await waitForSpendableBalance(
         railgun,
         MNEMONIC_A,
         ALIAS_A,
         USDC_ADDRESS,
-        transferAmount
+        minimoRequerido
       );
       console.log(`  Gastable: ${ethers.formatUnits(currentBalance, 6)} USDC`);
 
-      if (currentBalance >= transferAmount) {
+      if (currentBalance >= minimoRequerido) {
         console.log(`  Transfiriendo ${ethers.formatUnits(transferAmount, 6)} USDC a @${ALIAS_B}...\n`);
 
         // 3. Transferencia privada (genera ZK-proof)
         const txHash = await timed(
-          "prueba de conocimiento cero y envío de la transferencia",
+          viaBroadcaster
+            ? "transferencia completa vía retransmisor"
+            : "prueba de conocimiento cero y envío de la transferencia",
           () =>
-            railgun.privateTransfer(
-              USDC_ADDRESS,
-              transferAmount,
-              railgunAddressB,
-              signer
-            )
+            viaBroadcaster
+              ? railgun.privateTransferViaBroadcaster(
+                  USDC_ADDRESS,
+                  transferAmount,
+                  railgunAddressB
+                )
+              : railgun.privateTransfer(
+                  USDC_ADDRESS,
+                  transferAmount,
+                  railgunAddressB,
+                  signer
+                )
         );
         console.log(`\n  ✓ Transferencia completada: ${txHash}`);
         transferOk = true;
@@ -411,4 +427,12 @@ async function main() {
   console.log("╚════════════════════════════════════════════════════════════╝");
 }
 
-main().catch(console.error);
+// La red de retransmisores deja descriptores abiertos que sobreviven a su
+// cierre, de modo que el proceso no termina por sí solo. Se sale explícitamente
+// una vez completado el flujo.
+main()
+  .then(() => process.exit(0))
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });

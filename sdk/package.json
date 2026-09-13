@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@railgun-community/shared-models": "^8.0.1",
+    "@railgun-community/waku-broadcaster-client-node": "^9.1.1",
     "@railgun-community/wallet": "^10.8.6",
     "ethers": "^6.9.0",
     "leveldown": "^6.1.1",
