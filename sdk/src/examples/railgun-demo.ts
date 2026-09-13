@@ -27,6 +27,7 @@ import * as path from "path";
 
 import { AliasRegistryClient } from "../AliasRegistryClient";
 import { RailgunService } from "../railgun/RailgunService";
+import { DirectChannel } from "../SendChannel";
 import { generateStealthMetaAddress } from "../StealthAddress";
 
 config({ path: path.join(__dirname, "../../../contracts/.env") });
@@ -186,13 +187,10 @@ async function main() {
     if (!(await registry.isRegistered(ALIAS_A))) {
       console.log(`Registrando @${ALIAS_A} desde ${signer.address}...`);
       const keysA = generateStealthMetaAddress();
-      const tx = await registry.register(
-        ALIAS_A,
-        keysA.metaAddress,
-        walletA.railgunAddress
+      const hash = await new DirectChannel(signer).send(
+        await registry.populateRegister(ALIAS_A, keysA.metaAddress, walletA.railgunAddress)
       );
-      await tx.wait();
-      console.log(`  ✓ @${ALIAS_A} registrada (tx: ${tx.hash})`);
+      console.log(`  ✓ @${ALIAS_A} registrada (tx: ${hash})`);
     } else {
       const registeredAddressA = await registry.resolveRailgun(ALIAS_A);
       if (registeredAddressA !== walletA.railgunAddress) {
@@ -210,13 +208,10 @@ async function main() {
     if (!(await registryB.isRegistered(ALIAS_B))) {
       console.log(`Registrando @${ALIAS_B} desde ${signerB.address}...`);
       const keysB = generateStealthMetaAddress();
-      const tx = await registryB.register(
-        ALIAS_B,
-        keysB.metaAddress,
-        walletB.railgunAddress
+      const hash = await new DirectChannel(signerB).send(
+        await registryB.populateRegister(ALIAS_B, keysB.metaAddress, walletB.railgunAddress)
       );
-      await tx.wait();
-      console.log(`  ✓ @${ALIAS_B} registrado (tx: ${tx.hash})`);
+      console.log(`  ✓ @${ALIAS_B} registrado (tx: ${hash})`);
     } else {
       const registeredAddressB = await registryB.resolveRailgun(ALIAS_B);
       if (registeredAddressB !== walletB.railgunAddress) {

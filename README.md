@@ -84,81 +84,99 @@ npm test              # Run demo
 ## Uso del SDK
 
 ```typescript
-import { AliasRegistryClient, generateStealthAddress } from "@tesina/alias-sdk";
-import { ethers } from "ethers";
+import {
+  AliasRegistryClient,
+  DirectChannel,
+  RelayAdaptChannel,
+  RailgunService,
+  generateStealthMetaAddress,
+} from "@tesina/alias-sdk";
 
-// Conectar
-const provider = new ethers.JsonRpcProvider("https://polygon-rpc.com");
 const registry = new AliasRegistryClient(provider);
 
-// Resolver alias
-const metaAddress = await registry.resolve("bob");
+// Resolver un alias a la dirección Railgun que recibe los pagos
+const destino = await registry.resolveRailgun("bob");
 
-// Generar dirección de pago única
-const { stealthAddress, ephemeralPublicKey, viewTag } = generateStealthAddress(metaAddress);
+// Registrar: la invocación se prepara una sola vez...
+const keys = generateStealthMetaAddress();
+const call = await registry.populateRegister("carol", keys.metaAddress, railgunAddress);
 
-// Enviar fondos a stealthAddress (vía Railgun para privacidad)
+// ...y se entrega por el canal elegido.
+await new DirectChannel(signer).send(call);                  // expone al registrante
+await new RelayAdaptChannel(railgun, USDC, maxFee).send(call); // no lo expone
 ```
 
-## Demostración de extremo a extremo (línea de comandos)
+`SendChannel` es la interfaz común (patrón estrategia). La fuente de pago se fija al
+construir cada canal: una billetera pública en la vía directa, el token de la comisión
+del retransmisor en la privada.
 
-El flujo privado completo `@alice` → `@bob` se ejecuta **desde la terminal** con el SDK
-(no hay interfaz web). Los pasos son:
+## Demostración (línea de comandos)
 
-1. Crear las billeteras Railgun de Alice y Bob.
-2. Registrar ambos aliases on-chain en `AliasRegistry`.
-3. Alice **blinda** USDC en la reserva privada de Railgun (*shield*).
-4. Alice resuelve `@bob` → dirección Railgun del receptor.
-5. Alice **transfiere** USDC a Bob dentro de la reserva (transferencia privada con prueba ZK).
-6. Bob carga su billetera y **verifica la recepción**.
+Todo corre desde la terminal sobre Polygon mainnet, con fondos reales.
 
 ### Requisitos
 
-- Una wallet pública con **USDC y MATIC** (para gas) en Polygon mainnet.
-- Variables en `contracts/.env` (ver `contracts/.env.example`):
+Variables en `contracts/.env` (ver `contracts/.env.example`). Nada de esto va en el código.
 
-  | Variable | Uso |
-  |----------|-----|
-  | `PRIVATE_KEY` | Wallet pública que paga gas y hace el *shield* |
-  | `MNEMONIC_A` | Semilla de la billetera Railgun de Alice (remitente) |
-  | `MNEMONIC_B` | Semilla de la billetera Railgun de Bob (receptor) |
-  | `POLYGON_RPC` | RPC de Polygon (opcional, hay un default público) |
+| Variable | Uso |
+|----------|-----|
+| `POLYGON_RPC` | RPC de Polygon |
+| `POI_NODE_URLS` | Agregadores de Pruebas de Inocencia, separados por coma |
+| `PRIVATE_KEY` | Billetera pública de Alice: registra `@alice` y blinda |
+| `PRIVATE_KEY_B` | Billetera pública de Bob: registra `@bob` |
+| `MNEMONIC_A` | Billetera Railgun de Alice |
+| `MNEMONIC_B` | Billetera Railgun de Bob |
+| `MNEMONIC_INCOGNITO` | Billetera Railgun de `@incognito`, sin historia pública |
+
+La vía directa necesita POL para el gas. La vía por retransmisor no: paga una comisión
+en USDC desde el saldo blindado.
 
 ### Ejecución
 
 ```bash
-cd sdk
-npm install
+cd sdk && npm install
 
-# Solo registro de aliases (@alice, @bob) on-chain
-npm run demo:railgun
+npm run demo:railgun                                    # registra @alice y @bob
+npm run demo:railgun -- --shield                        # + blinda USDC
+npm run demo:railgun -- --shield --transfer             # + transfiere @alice → @bob
+npm run demo:railgun -- --transfer --broadcaster        # la transferencia sale por retransmisor
 
-# + blindar USDC en la reserva de Railgun
-npm run demo:railgun -- --shield
-
-# Flujo completo: registro + shield + transferencia privada @alice → @bob
-npm run demo:railgun -- --shield --transfer
+npx ts-node src/examples/transferencia-inversa.ts [--broadcaster]   # @bob → @alice
+npx ts-node src/examples/registro-privado.ts [alias]                # registro por Relay Adapt
+npx ts-node src/examples/ciclo-incognito.ts                         # @alice → @incognito → @bob
+npx ts-node src/examples/verificar-enlazabilidad.ts                 # quién registró cada alias
 ```
 
-> La primera corrida descarga los artefactos ZK y sincroniza el *merkletree*, por lo que
-> puede tardar varios minutos.
+> La primera corrida descarga los artefactos ZK y sincroniza el árbol de Merkle (minutos).
+> Los fondos recién blindados no son gastables durante una hora; los recibidos por
+> transferencia privada, sí.
 
-### Corrida confirmada on-chain
+### Corridas confirmadas on-chain
 
-El flujo completo se validó en Polygon mainnet. Los hashes verificables y el detalle del
-obstáculo de POI (*Proof of Innocence*) que hubo que resolver están en
-[`POI_INVESTIGATION.md`](./POI_INVESTIGATION.md):
+Vía directa (cada participante con su propia billetera pública):
 
-| Operación | Hash | Bloque |
-|-----------|------|--------|
-| Registro `@alice` | `0xc864fc5f…` | 86.593.146 |
-| Registro `@bob` | `0xe61d9f81…` | 86.593.150 |
-| Transferencia privada (0,01 USDC) | `0x3cc8c3ebe675…7f19db59` | 86.744.133 |
+| Operación | Bloque | Hash |
+|-----------|--------|------|
+| Registro `@alice` | 93.699.091 | `0xf41ef261f4d5cf4bb2481f46cf723fc3a8b1199228687c607aa7a0ea1664bc8f` |
+| Registro `@bob` | 93.699.095 | `0x195170453dc72db3755e11158d1c3ecee7034b18fe8cd9efe3f45cabdee7f42c` |
+| Blindaje | 93.699.109 | `0xbf0556c0d1f81b0be759835e21f752f1b77aa61d1254b7a543b978a4fe062e63` |
+| Transferencia `@alice` → `@bob` | 93.699.157 | `0x9fadaa20b591ccd35009fd619e54bf21481b30a8e140b760778cc15f4da8e71f` |
+| Transferencia `@bob` → `@alice` | 93.708.054 | `0x9427743fec2d11f5474b9405b12eb2015937e5ffe09a0a5a0d1cf6ce610f296b` |
 
-> **Nota de privacidad:** en esta demostración las tres transacciones se emiten desde una
-> misma billetera pública, lo que permite a un observador vincularlas entre sí. Es un
-> artefacto del script (una sola wallet por simplicidad); un uso real requiere billeteras
-> separadas por participante.
+Vía privada (firma el retransmisor; ninguna billetera de los participantes aparece):
+
+| Operación | Bloque | Hash | Comisión |
+|-----------|--------|------|----------|
+| Transferencia `@alice` → `@bob` | 93.707.013 | `0x09ba4ef23e93b76ed0f40a373284671123a2ea96e2003bbdc157c45529bcb3fb` | 0,057 USDC |
+| Transferencia `@alice` → `@bob` | 93.708.093 | `0x7811811c6931edc54fb203f15693157d498741f9f12a64d426de03c6bc540273` | 0,065 USDC |
+| Registro `@incognito` (Relay Adapt) | 93.729.407 | `0x90288009ae78895ae8d795b9bb609d3acb6a6635c6ce87c94389b2904e4cd549` | 0,119 USDC |
+| Transferencia `@alice` → `@incognito` | 93.729.491 | `0xd90611aff42ab7ead59b830f983ce74e916f0db9b476ee85b33f0ef1215a76db` | 0,059 USDC |
+| Transferencia `@incognito` → `@bob` | 93.729.508 | `0xf88183f5a9d9f70c665b2ab62051d96548789f2638e42ebdd5b7af5feb01e4bf` | 0,056 USDC |
+
+En el registro de `@incognito`, el campo `registrant` del evento es el contrato Relay
+Adapt (`0xF82d00fC51F730F42A00F85E74895a2849ffF2Dd`) y el firmante es el retransmisor. Lo
+único que sigue siendo público es el blindaje: expone a quien deposita. El diagnóstico
+completo está en [`DEMO_ENLAZABILIDAD.md`](./DEMO_ENLAZABILIDAD.md).
 
 ## Estándares
 

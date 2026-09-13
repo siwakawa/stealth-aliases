@@ -12,6 +12,10 @@ export {
 } from "./StealthAddress";
 export type { StealthMetaAddress, StealthKeyPair } from "./StealthAddress";
 
+// Canales de envío: vía directa y vía privada (Relay Adapt)
+export { DirectChannel, RelayAdaptChannel } from "./SendChannel";
+export type { SendChannel } from "./SendChannel";
+
 // Integración con Railgun
 export { RailgunService } from "./railgun/RailgunService";
 export type { RailgunConfig } from "./railgun/RailgunService";

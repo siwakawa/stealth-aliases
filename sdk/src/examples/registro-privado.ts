@@ -30,6 +30,7 @@ import { NetworkName } from "@railgun-community/shared-models";
 
 import { AliasRegistryClient } from "../AliasRegistryClient";
 import { RailgunService } from "../railgun/RailgunService";
+import { RelayAdaptChannel } from "../SendChannel";
 import { generateStealthMetaAddress } from "../StealthAddress";
 
 config({ path: path.join(__dirname, "../../../contracts/.env") });
@@ -93,7 +94,7 @@ async function main() {
     console.log(`  Saldo gastable: ${ethers.formatUnits(spendable, 6)} USDC\n`);
 
     // La invocación se prepara igual que en la vía directa; lo único que cambia
-    // es por dónde se entrega.
+    // es el canal por el que se entrega.
     const keys = generateStealthMetaAddress();
     const preparedCall = await registry.populateRegister(
       alias,
@@ -103,11 +104,8 @@ async function main() {
     console.log(`  Invocación preparada para ${preparedCall.to}`);
     console.log(`  (${(preparedCall.data!.length - 2) / 2} bytes de datos)\n`);
 
-    const hash = await railgun.sendViaRelayAdapt(
-      preparedCall,
-      USDC_ADDRESS,
-      MAX_FEE
-    );
+    const channel = new RelayAdaptChannel(railgun, USDC_ADDRESS, MAX_FEE);
+    const hash = await channel.send(preparedCall);
 
     console.log(`\n  ✓ @${alias} registrado: ${hash}`);
 

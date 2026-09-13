@@ -249,3 +249,53 @@ modo que la salida capturada no los refleja:
   Ahora ese rechazo se ignora, pero sólo una vez iniciado el apagado y sólo para ese error.
 - Los balances finales mostraban el saldo de la emisora previo a la transferencia, porque
   se leían sin reescanear. Ahora se refrescan antes de informarlos.
+
+## 10. La vía privada: retransmisor y Relay Adapt
+
+Las secciones anteriores dejan a la emisora identificable por dos vías: paga el gas desde
+la dirección que registró su alias, y el blindaje salió de esa misma dirección. La primera
+se eliminó emitiendo las operaciones a través de un retransmisor.
+
+**Transferencias.** `privateTransferViaBroadcaster` entrega la transacción a un
+retransmisor de la red Waku, que la firma y cobra su comisión en USDC desde el saldo
+blindado. El firmante de las transacciones es el retransmisor
+(`0xAC4Fe09e1b245e7FD31654369261517b08221cdc`); ninguna billetera de los participantes
+aparece.
+
+**Registro.** `RelayAdaptChannel` envuelve la invocación a `register` en una llamada del
+contrato Relay Adapt. El contrato observa como `msg.sender` a Relay Adapt
+(`0xF82d00fC51F730F42A00F85E74895a2849ffF2Dd`), que es lo que queda en el campo
+`registrant` del evento.
+
+Ocultar al registrante no alcanza si el destino lo delata: si `@incognito` apuntara a la
+dirección Railgun de `@alice`, resolver ambos aliases bastaría para vincularlos. Por eso
+el alias apunta a una billetera Railgun propia (`MNEMONIC_INCOGNITO`), y
+`registro-privado.ts` aborta si la dirección coincide con la de un alias existente.
+
+| Operación | Bloque | Hash | Gas | Comisión |
+|-----------|--------|------|-----|----------|
+| Registro `@incognito` | 93.729.407 | `0x90288009ae78895ae8d795b9bb609d3acb6a6635c6ce87c94389b2904e4cd549` | 1.561.252 | 0,1193 USDC |
+| `@alice` → `@incognito` (0,2 USDC) | 93.729.491 | `0xd90611aff42ab7ead59b830f983ce74e916f0db9b476ee85b33f0ef1215a76db` | 1.410.000 | 0,058855 USDC |
+| `@incognito` → `@bob` (0,01 USDC) | 93.729.508 | `0xf88183f5a9d9f70c665b2ab62051d96548789f2638e42ebdd5b7af5feb01e4bf` | 1.368.764 | 0,056033 USDC |
+
+La billetera de `@incognito` nunca tuvo POL: se registró, cobró y pagó sin que su dueño
+aparezca en la cadena. El pago recibido fue gastable a los 25 s: las notas que llegan por
+transferencia heredan la validación POI de las que las originaron. La espera de una hora
+rige sólo para lo recién blindado.
+
+Lo que queda en pie es el blindaje, que es público y expone a quien deposita.
+
+### Hallazgos de la integración
+
+- **Firmante de confianza.** `WakuBroadcasterClient.start` acepta un `trustedFeeSigner`.
+  Configurado, descartaba todas las cotizaciones para USDC nativo; con `""` las acepta y
+  el cliente valida la comisión contra un tope antes de generar la prueba.
+- **Oferta.** Para USDC nativo en Polygon había un único retransmisor; para USDC.e, entre
+  10 y 13. `sondear-retransmisores.ts` lo mide.
+- **Tipo de gas.** Con retransmisor la transacción debe ser de tipo 1
+  (`getEVMGasTypeForTransaction(Polygon, false)`), con un precio único que la prueba fija.
+- **Nota de vuelto.** Tras gastar, el resto vuelve como una nota nueva sin Prueba de
+  Inocencia. La genera el cliente (`generatePOIsForWallet`, segundos), pero si no se pide
+  el saldo queda inmovilizado sin error. `unlockChangeNotes` lo hace después de cada envío.
+- **Tiempos.** Prueba de 2,2 a 5,6 s por retransmisor frente a 0,7 s directa: incluye la
+  prueba de que las notas gastadas tienen su POI, que el retransmisor exige.
