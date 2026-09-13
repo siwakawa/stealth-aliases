@@ -22,8 +22,8 @@ Este proyecto permite registrar aliases humanos que resuelven a stealth meta-add
        ▼                                       ▼
 ┌─────────────┐  generate stealth    ┌──────────────────┐
 │    SDK      │ ◄─────────────────── │   66 bytes:      │
-│             │      address         │  viewing (33) +  │
-└─────────────┘                      │  spending (33)   │
+│             │      address         │  spending (33) + │
+└─────────────┘                      │  viewing (33)    │
        │                             └──────────────────┘
        │
        ▼
