@@ -306,3 +306,31 @@ Lo que queda en pie es el blindaje, que es público y expone a quien deposita.
   por retransmisor, y la nota se habilita en uno o dos minutos.
 - **Tiempos.** Prueba de 2,2 a 5,6 s por retransmisor frente a 0,7 s directa: incluye la
   prueba de que las notas gastadas tienen su POI, que el retransmisor exige.
+
+## 11. Claves sigilosas recuperables y nuevo despliegue
+
+Hasta aquí, las claves sigilosas de cada alias se generaban al azar y se descartaban: la
+metadirección quedaba publicada, pero un pago dirigido a ella no podía cobrarse. Además, el
+secreto compartido se hasheaba sobre la coordenada x, mientras que la implementación de
+referencia de los autores de ERC-5564 (`@scopelift/stealth-address-sdk`) lo hace sobre el punto
+comprimido, de modo que las direcciones derivadas no eran reconocibles por las billeteras que la
+usan.
+
+Se corrigieron las dos cosas:
+
+- Las claves se derivan de la frase de recuperación por rutas endurecidas
+  `m/5564'/<índice del alias>'/{0',1'}`, con el índice tomado de `keccak256` del alias
+  normalizado. Aliases distintos obtienen metadirecciones distintas.
+- El hash se calcula sobre el punto comprimido. Los vectores de prueba se generaron con la
+  librería de referencia; al hacerlo apareció que esa librería ignora sin avisar las claves
+  efímeras con prefijo `0x` y usa una al azar, por lo que hay que pasárselas en bytes.
+
+Como el registro es inmutable, las metadirecciones anteriores no podían reemplazarse. Se desplegó
+un contrato nuevo con el mismo código, `0x3957987D2Fb35d4ca17D4Fcba29E576Fb586Fa9B` (bloque
+93.745.539, verificado en Sourcify y Polygonscan), se registraron de nuevo `@alice`, `@bob` e
+`@incognito`, y se repitió la evidencia sobre ese contrato (ver README). `@incognito` pagó esta
+vez la comisión de su registro con su propio saldo blindado.
+
+Datos que cambian respecto de las secciones anteriores: el blindaje del demo precedió a la
+transferencia directa en 24 s; `@incognito` reenvió lo recibido a los 69 s; la transferencia
+directa consumió 1.387.531 de gas y el blindaje 848.434; el registro por Relay Adapt, 1.550.574.
