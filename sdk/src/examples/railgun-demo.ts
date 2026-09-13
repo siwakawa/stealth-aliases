@@ -168,11 +168,12 @@ async function main() {
 
   // Cada participante opera con su propia billetera pública; el canal que se
   // construye depende solo de la vía elegida.
-  const appFor = (participantSigner: ethers.Wallet) =>
+  const appFor = (participantSigner: ethers.Wallet, participantMnemonic: string) =>
     new AliasApp(
       registry,
       railgun,
-      createChannel(via, { railgun, signer: participantSigner, feeToken: USDC_ADDRESS, maxFee: MAX_FEE })
+      createChannel(via, { railgun, signer: participantSigner, feeToken: USDC_ADDRESS, maxFee: MAX_FEE }),
+      participantMnemonic
     );
 
   try {
@@ -202,7 +203,7 @@ async function main() {
     if (!(await registry.isRegistered(ALIAS_A))) {
       console.log(`Registrando @${ALIAS_A} (vía ${via})...`);
       await railgun.getOrCreateWallet(MNEMONIC_A, ALIAS_A);
-      const hash = await appFor(signer).registerAlias(ALIAS_A);
+      const hash = await appFor(signer, MNEMONIC_A).registerAlias(ALIAS_A);
       console.log(`  ✓ @${ALIAS_A} registrada (tx: ${hash})`);
     } else {
       const registeredAddressA = await registry.resolveRailgun(ALIAS_A);
@@ -221,7 +222,7 @@ async function main() {
     if (!(await registry.isRegistered(ALIAS_B))) {
       console.log(`Registrando @${ALIAS_B} (vía ${via})...`);
       await railgun.getOrCreateWallet(MNEMONIC_B, ALIAS_B);
-      const hash = await appFor(signerB).registerAlias(ALIAS_B);
+      const hash = await appFor(signerB, MNEMONIC_B).registerAlias(ALIAS_B);
       console.log(`  ✓ @${ALIAS_B} registrado (tx: ${hash})`);
     } else {
       const registeredAddressB = await registry.resolveRailgun(ALIAS_B);
@@ -345,7 +346,7 @@ async function main() {
 
         // 3. Transferencia privada (genera ZK-proof), por el canal elegido
         const txHash = await timed(`transferencia completa (vía ${via})`, () =>
-          appFor(signer).sendToAlias(ALIAS_B, USDC_ADDRESS, transferAmount)
+          appFor(signer, MNEMONIC_A).sendToAlias(ALIAS_B, USDC_ADDRESS, transferAmount)
         );
         console.log(`\n  ✓ Transferencia completada: ${txHash}`);
         transferOk = true;

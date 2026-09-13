@@ -18,13 +18,13 @@ import * as path from "path";
 config({ path: path.join(__dirname, "../../../contracts/.env") });
 
 const RPC_URL = process.env.POLYGON_RPC;
-const REGISTRY = "0xEee312ACa2dCdCF372eDD5CE6D58419F6459bA9d";
+const REGISTRY = "0x3957987D2Fb35d4ca17D4Fcba29E576Fb586Fa9B";
 const ALIAS_A = process.env.ALIAS_A || "alice";
 const ALIAS_B = process.env.ALIAS_B || "bob";
 
 // El contrato se desplegó después de este bloque; acota el rango de logs para
 // no pedirle al RPC un barrido de toda la historia de la red.
-const DESDE = 93_690_000;
+const DESDE = 93_745_500;
 
 const ABI = [
   "event AliasRegistered(bytes32 indexed aliasHash, string alias_, bytes stealthMetaAddress, string railgunAddress, address indexed registrant)",

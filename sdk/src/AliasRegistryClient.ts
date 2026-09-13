@@ -3,13 +3,13 @@ import AliasRegistryABI from "./abi/AliasRegistry.json";
 
 // Direcciones del contrato desplegado
 export const DEPLOYMENTS: Record<number, string> = {
-  137: "0xEee312ACa2dCdCF372eDD5CE6D58419F6459bA9d", // Polygon Mainnet
+  137: "0x3957987D2Fb35d4ca17D4Fcba29E576Fb586Fa9B", // Polygon Mainnet
 };
 
 // Bloque anterior al despliegue en cada red: acota la búsqueda de eventos, que
 // de otro modo recorrería toda la historia de la cadena.
 const DEPLOYMENT_BLOCKS: Record<number, number> = {
-  137: 93_690_000,
+  137: 93_745_500,
 };
 
 export interface AliasInfo {

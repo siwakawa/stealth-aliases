@@ -49,6 +49,59 @@ export function generateStealthMetaAddress(): {
   return { viewing, spending, metaAddress };
 }
 
+// Propósito propio para las rutas de derivación de claves sigilosas, distinto
+// de los que usan Ethereum (44') y Railgun (44'/1984', 420'/1984').
+const STEALTH_PURPOSE = 5564;
+
+/**
+ * Normaliza un alias igual que el contrato: mayúsculas ASCII a minúsculas.
+ */
+export function normalizeAlias(alias: string): string {
+  return alias.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+/**
+ * Índice de derivación de un alias: los primeros 31 bits de keccak256 del alias
+ * normalizado, de modo que cada alias tiene claves propias y se recuperan sin
+ * guardar ningún estado.
+ */
+function aliasIndex(alias: string): number {
+  const hash = ethers.keccak256(ethers.toUtf8Bytes(normalizeAlias(alias)));
+  return parseInt(hash.slice(2, 10), 16) & 0x7fffffff;
+}
+
+function keyPairAt(mnemonic: string, path: string): StealthKeyPair {
+  const node = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, path);
+  return {
+    privateKey: ethers.getBytes(node.privateKey),
+    publicKey: ethers.getBytes(node.signingKey.compressedPublicKey),
+  };
+}
+
+/**
+ * Deriva las claves sigilosas de un alias a partir de la frase de recuperación.
+ *
+ * Rutas endurecidas m/5564'/<índice del alias>'/0' (gasto) y .../1'
+ * (visualización). La misma frase y el mismo alias producen siempre las mismas
+ * claves, así que quien conserva la frase puede reconstruirlas y cobrar lo que
+ * llegue a la metadirección publicada. Aliases distintos obtienen metadirecciones
+ * distintas, que por lo tanto no se vinculan entre sí.
+ */
+export function deriveStealthKeys(
+  mnemonic: string,
+  alias: string
+): { viewing: StealthKeyPair; spending: StealthKeyPair; metaAddress: Uint8Array } {
+  const base = `m/${STEALTH_PURPOSE}'/${aliasIndex(alias)}'`;
+  const spending = keyPairAt(mnemonic, `${base}/0'`);
+  const viewing = keyPairAt(mnemonic, `${base}/1'`);
+
+  const metaAddress = new Uint8Array(66);
+  metaAddress.set(spending.publicKey, 0);
+  metaAddress.set(viewing.publicKey, 33);
+
+  return { viewing, spending, metaAddress };
+}
+
 /**
  * Parsea una stealth meta-address de 66 bytes
  */
@@ -173,20 +226,21 @@ const SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E
 
 
 /**
- * Calcula ECDH shared secret (coordenada X del punto compartido)
- * Implementación real usando ethers.SigningKey.computeSharedSecret
+ * Secreto compartido ECDH, codificado como punto comprimido (33 bytes).
+ *
+ * ERC-5564 no fija cómo se codifica el punto antes de hashearlo. Se usa el punto
+ * comprimido porque es lo que hace la implementación de referencia de los autores
+ * del estándar (@scopelift/stealth-address-sdk); con otra codificación, las
+ * direcciones derivadas no serían reconocibles por las billeteras que la usan.
  */
 function computeSharedSecret(
   privateKey: Uint8Array,
   publicKey: Uint8Array
 ): Uint8Array {
   const signingKey = new ethers.SigningKey(ethers.hexlify(privateKey));
-  // computeSharedSecret retorna el punto completo (04 || x || y)
-  const sharedPoint = signingKey.computeSharedSecret(
-    ethers.hexlify(publicKey)
-  );
-  // Extraer coordenada X (bytes 1-33, saltando el prefijo 04)
-  return ethers.getBytes(sharedPoint).slice(1, 33);
+  // computeSharedSecret devuelve el punto sin comprimir (04 || x || y)
+  const sharedPoint = signingKey.computeSharedSecret(ethers.hexlify(publicKey));
+  return ethers.getBytes(ethers.SigningKey.computePublicKey(sharedPoint, true));
 }
 
 /**

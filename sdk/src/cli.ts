@@ -10,6 +10,7 @@
  *   npm run alias -- send <alias> <amount>     --wallet <nombre> --via direct|private
  *   npm run alias -- shield <amount>           --wallet <nombre>
  *   npm run alias -- balance                   --wallet <nombre>
+ *   npm run alias -- verify-meta <alias>       --wallet <nombre>
  *
  * Billeteras, definidas en contracts/.env:
  *   alice      MNEMONIC_A y PRIVATE_KEY
@@ -89,7 +90,7 @@ async function main() {
         if (!VIAS.includes(via)) throw new Error(`Vía desconocida: ${via} (direct|private)`);
 
         const channel = createChannel(via, { railgun, signer, feeToken: USDC, maxFee: MAX_FEE });
-        const app = new AliasApp(new AliasRegistryClient(provider), railgun, channel);
+        const app = new AliasApp(new AliasRegistryClient(provider), railgun, channel, mnemonic);
 
         const t0 = Date.now();
         const hash =
@@ -113,6 +114,15 @@ async function main() {
         break;
       }
 
+      case "verify-meta": {
+        // No requiere canal: solo lee el registro y deriva las claves localmente.
+        const alias = required(args[1], "Falta el alias");
+        const app = new AliasApp(new AliasRegistryClient(provider), railgun, createChannel("private", { railgun, feeToken: USDC }), mnemonic);
+        const owns = await app.ownsStealthMetaAddress(alias);
+        console.log(`\n  @${alias}: ${owns ? "la metadirección registrada se deriva de esta frase" : "la metadirección registrada NO se deriva de esta frase"}`);
+        break;
+      }
+
       case "balance": {
         await railgun.refreshWalletBalances();
         const total = await railgun.getBalance(USDC);
@@ -122,7 +132,7 @@ async function main() {
       }
 
       default:
-        throw new Error("Comandos: register, send, shield, balance");
+        throw new Error("Comandos: register, send, shield, balance, verify-meta");
     }
   } finally {
     shuttingDown = true;

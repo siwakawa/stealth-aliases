@@ -6,6 +6,8 @@ export type { AliasInfo } from "./AliasRegistryClient";
 export {
   generateKeyPair,
   generateStealthMetaAddress,
+  deriveStealthKeys,
+  normalizeAlias,
   parseStealthMetaAddress,
   generateStealthAddress,
   checkStealthAddress,

@@ -1,0 +1,36 @@
+{
+  "source": "@scopelift/stealth-address-sdk@1.0.0-beta.5",
+  "schemeId": 1,
+  "vectors": [
+    {
+      "spendingPrivateKey": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+      "viewingPrivateKey": "0x0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "stealthMetaAddress": "0x03f76a39d05686e34a4420897e359371836145dd3973e3982568b60f8433adde6e02552c630b64b54bf50210c9e253d38bd4949c72e22873500f6285c2bede312a84",
+      "ephemeralPrivateKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "ephemeralPublicKey": "0x034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
+      "viewTag": "0x23",
+      "stealthAddress": "0x446678D1da0c459c9f2932fF455462a9D292D370",
+      "stealthPrivateKey": "0x2d2ae3d259d956b495eab4e65457c428a1373bfcbeb99ee1f083b5c8c4defdbd"
+    },
+    {
+      "spendingPrivateKey": "0x363721eb9e981558c748b824cb32a840da2b3e8957c2fc3bcb8d9c86cb874560",
+      "viewingPrivateKey": "0xb52a0555f6a8663d89f00365893b1ef9e38eaf2e8bc48a63319c9ea5cb4a27c5",
+      "stealthMetaAddress": "0x0294172b4a1478eeaa4f171629c6035bdf4f025fd86190fde4c86dd013116953fd0390ad5eca026c05ab5cf4d620a2ac65241b11df004ddca360e954db1b26e3846e",
+      "ephemeralPrivateKey": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "ephemeralPublicKey": "0x02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27",
+      "viewTag": "0xb2",
+      "stealthAddress": "0x3443493ddBeD58171Fad03329e24112Ce7e3612f",
+      "stealthPrivateKey": "0xe86c557ce1890ab2950fd0c0a80c45de5bcc23349cfa9bbcf6661bd8996aa2ab"
+    },
+    {
+      "spendingPrivateKey": "0x7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+      "viewingPrivateKey": "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c",
+      "stealthMetaAddress": "0x02b9aea0bf6be18d3ed48d1cc3495e9af5e499ad90a84930990ba58b198ee81b5e026776bee20c9bf74c421e703c23a132f6dbdf6c882c7f6634b128e66820139db1",
+      "ephemeralPrivateKey": "0x5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d01",
+      "ephemeralPublicKey": "0x029522d38a313c4826b76b568898958f0d077df4a369af69455a6b9c988d28b527",
+      "viewTag": "0x7b",
+      "stealthAddress": "0xB9d160833Dd7DEac7fEce5c0E18416f2BA12393a",
+      "stealthPrivateKey": "0xfa28e9076b7ada1292ddb8e14150e4e14f94afabce219118d25b92dd6d5491d0"
+    }
+  ]
+}

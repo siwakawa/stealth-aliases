@@ -3,6 +3,7 @@ import { ethers } from "hardhat";
 
 import { AliasApp } from "../../sdk/src/AliasApp";
 import { AliasRegistryClient } from "../../sdk/src/AliasRegistryClient";
+import { deriveStealthKeys } from "../../sdk/src/StealthAddress";
 import {
   createChannel,
   DirectChannel,
@@ -20,6 +21,7 @@ describe("Canal de envío y AliasApp", function () {
   const USDC = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
   const railgunAlice = "0zk1qy" + "a".repeat(121);
   const railgunBob = "0zk1qy" + "b".repeat(121);
+  const mnemonic = "test test test test test test test test test test test junk";
 
   let registryAddress: string;
   let chainId: number;
@@ -72,7 +74,7 @@ describe("Canal de envío y AliasApp", function () {
       const [signer] = await ethers.getSigners();
       const railgun = fakeRailgun(railgunAlice) as any;
       const client = clientFor(ethers.provider);
-      const app = new AliasApp(client, railgun, createChannel("direct", { railgun, signer: signer as any, feeToken: USDC }));
+      const app = new AliasApp(client, railgun, createChannel("direct", { railgun, signer: signer as any, feeToken: USDC }), mnemonic);
 
       const hash = await app.registerAlias("alice");
 
@@ -81,6 +83,19 @@ describe("Canal de envío y AliasApp", function () {
       const event = registry.interface.parseLog(receipt!.logs[0])!;
       expect(event.args.registrant).to.equal(signer.address);
       expect(await client.resolveRailgun("alice")).to.equal(railgunAlice);
+    });
+
+    it("registra la metadirección derivada de la frase de recuperación", async function () {
+      const [signer] = await ethers.getSigners();
+      const railgun = fakeRailgun(railgunAlice) as any;
+      const client = clientFor(ethers.provider);
+      const app = new AliasApp(client, railgun, createChannel("direct", { railgun, signer: signer as any, feeToken: USDC }), mnemonic);
+
+      await app.registerAlias("alice");
+
+      const { stealthMetaAddress } = await client.resolve("alice");
+      expect(stealthMetaAddress).to.equal(ethers.hexlify(deriveStealthKeys(mnemonic, "alice").metaAddress));
+      expect(await app.ownsStealthMetaAddress("alice")).to.equal(true);
     });
 
     it("transfiere firmando con la billetera pública", async function () {
@@ -101,7 +116,7 @@ describe("Canal de envío y AliasApp", function () {
     it("entrega el registro a Relay Adapt con la comisión en el token indicado", async function () {
       const railgun = fakeRailgun(railgunAlice);
       const client = clientFor(ethers.provider);
-      const app = new AliasApp(client, railgun as any, createChannel("private", { railgun: railgun as any, feeToken: USDC, maxFee: 200_000n }));
+      const app = new AliasApp(client, railgun as any, createChannel("private", { railgun: railgun as any, feeToken: USDC, maxFee: 200_000n }), mnemonic);
 
       await app.registerAlias("alice");
 
@@ -129,7 +144,7 @@ describe("Canal de envío y AliasApp", function () {
       const [signer] = await ethers.getSigners();
       const railgunB = fakeRailgun(railgunBob) as any;
       const client = clientFor(ethers.provider);
-      await new AliasApp(client, railgunB, createChannel("direct", { railgun: railgunB, signer: signer as any, feeToken: USDC })).registerAlias("bob");
+      await new AliasApp(client, railgunB, createChannel("direct", { railgun: railgunB, signer: signer as any, feeToken: USDC }), mnemonic).registerAlias("bob");
 
       const received: unknown[][] = [];
       const recordingChannel: SendChannel = {
@@ -139,7 +154,7 @@ describe("Canal de envío y AliasApp", function () {
           return "0x";
         },
       };
-      const app = new AliasApp(client, fakeRailgun(railgunAlice) as any, recordingChannel);
+      const app = new AliasApp(client, fakeRailgun(railgunAlice) as any, recordingChannel, mnemonic);
 
       await app.sendToAlias("bob", USDC, 10_000n);
 
@@ -152,14 +167,14 @@ describe("Canal de envío y AliasApp", function () {
         transfer: async () => {
           throw new Error("no debería transferir");
         },
-      });
+      }, mnemonic);
       await expectRejection(app.sendToAlias("nadie", USDC, 1n), /no está registrado/);
     });
 
     it("no registra un segundo alias sobre la misma billetera, que los vincularía", async function () {
       const [signer] = await ethers.getSigners();
       const railgun = fakeRailgun(railgunAlice) as any;
-      const app = new AliasApp(clientFor(ethers.provider), railgun, createChannel("direct", { railgun, signer: signer as any, feeToken: USDC }));
+      const app = new AliasApp(clientFor(ethers.provider), railgun, createChannel("direct", { railgun, signer: signer as any, feeToken: USDC }), mnemonic);
 
       await app.registerAlias("alice");
       await expectRejection(app.registerAlias("alice2"), /ya recibe los pagos de @alice/);
