@@ -145,6 +145,7 @@ npx ts-node src/examples/transferencia-inversa.ts [--broadcaster]   # @bob → @
 npx ts-node src/examples/registro-privado.ts [alias]                # registro por Relay Adapt
 npx ts-node src/examples/ciclo-incognito.ts                         # @alice → @incognito → @bob
 npx ts-node src/examples/verificar-enlazabilidad.ts                 # quién registró cada alias
+npx ts-node src/examples/medir-sigilosas.ts                         # tiempos de direcciones sigilosas
 ```
 
 > La primera corrida descarga los artefactos ZK y sincroniza el árbol de Merkle (minutos).
