@@ -279,17 +279,23 @@ export class RailgunService {
       throw new Error("No se pudo generar el mnemonic");
     }
 
-    // Usar un block number reciente para evitar scan desde genesis
-    const currentBlock = await this.provider.getBlockNumber();
     const chain = this.getChain();
 
-    // Empezar a scanear desde 100 bloques atrás (~3 min en Polygon)
-    const creationBlockNumbers: { [key: string]: number } = {
-      [this.networkName]: Math.max(0, currentBlock - 100),
-    };
+    // El bloque de creación solo acota el descifrado de las notas propias: el
+    // árbol de Merkle se sincroniza completo igual. Una semilla recién generada
+    // no puede tener notas anteriores, así que basta con empezar cerca del bloque
+    // actual. Una semilla importada sí puede tenerlas: acotarla dejaría fuera sus
+    // fondos, de modo que se descifra el árbol entero.
+    let creationBlockNumbers: { [key: string]: number } | undefined;
+    if (!mnemonic) {
+      const currentBlock = await this.provider.getBlockNumber();
+      creationBlockNumbers = { [this.networkName]: Math.max(0, currentBlock - 100) };
+    }
 
     console.log(
-      `Creando wallet Railgun (scan desde bloque ${creationBlockNumbers[this.networkName]})...`
+      creationBlockNumbers
+        ? `Creando wallet Railgun nueva (notas desde bloque ${creationBlockNumbers[this.networkName]})...`
+        : "Importando wallet Railgun (se buscan notas en todo el árbol)..."
     );
     const walletResponse = await createRailgunWallet(
       this.encryptionKey,
