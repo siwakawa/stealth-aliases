@@ -1151,25 +1151,3 @@ export class RailgunService {
     }
   }
 }
-
-/**
- * Direcciones de contratos Railgun en diferentes redes
- */
-export const RAILGUN_CONTRACTS = {
-  [NetworkName.Ethereum]: {
-    proxy: "0xfa7093cdd9ee6932b4eb2c9e1cde7ce00b1fa4b9",
-    relay: "0x4025ee6512dbbda97049bcf5aa5d38c54af6be8a",
-  },
-  [NetworkName.Polygon]: {
-    proxy: "0x19b620929f97b7b990801496c3b361ca5def8c71",
-    relay: "0xc7ffa542736321a3dd69246d73987566a5486968",
-  },
-  [NetworkName.BNBChain]: {
-    proxy: "0x590162bf4b50f6576a459b75309ee21d92178a10",
-    relay: "0x753f0f9ba003dda95eb9284533cf5b0f19e441dc",
-  },
-  [NetworkName.Arbitrum]: {
-    proxy: "0xfa7093cdd9ee6932b4eb2c9e1cde7ce00b1fa4b9",
-    relay: "0x5ad95c537b002770a39dea342c4bb2b68b1497aa",
-  },
-};

@@ -6,10 +6,9 @@
  * su disponibilidad no está garantizada. El precedente es el agregador de
  * Pruebas de Inocencia, cuya desaparición dejó fondos inmovilizados.
  *
- * No envía ninguna transacción ni gasta gas: sólo se conecta, escucha y lista.
- *
- * Requiere instalar la dependencia (no está en package.json):
- *   npm install @railgun-community/waku-broadcaster-client-node@9.1.1
+ * No envía ninguna transacción ni gasta gas: solo se conecta, escucha y lista.
+ * Así se midió la oferta en Polygon: un único retransmisor para USDC nativo
+ * frente a más de diez para USDC.e.
  *
  * Uso:
  *   ts-node src/examples/sondear-retransmisores.ts

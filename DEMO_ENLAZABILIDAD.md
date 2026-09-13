@@ -154,13 +154,18 @@ quedarse esperando en silencio. Ninguna URL quedó escrita en el código; por la
 se quitaron los RPC públicos que figuraban como respaldo y `POLYGON_RPC` pasó a ser
 obligatorio.
 
-### Sobre la supuesta espera de una hora
+### Sobre la espera de una hora
 
-Circula la idea de que hay un plazo fijo de una hora antes de que una nota sea gastable.
-**No se pudo verificar y probablemente no existe como tal.** En el motor instalado no hay
-ninguna constante semejante; la espera depende enteramente de que un agregador responda.
-La cifra proviene de una nota de investigación anterior (`POI_SHIELD_PENDING_SEC = 3600`)
-que no se corresponde con ninguna constante de las versiones en uso.
+La espera existe, pero no es una constante del cliente: es una política de los proveedores
+de listas, documentada por Railgun como *Unshield-Only Standby Period*
+(<https://docs.railgun.org/wiki/assurance/private-proofs-of-innocence>). Durante esa hora
+lo recién blindado solo puede desblindarse. Por eso no aparece en el motor instalado, y
+por eso una nota de investigación anterior que la buscaba como constante no la encontró.
+
+Rige solo a la entrada: las notas recibidas por transferencia privada heredan la
+validación de las que las originaron y son gastables de inmediato (sección 10). En la
+transferencia directa de la sección 8, el blindaje de 72 s antes todavía no era gastable;
+lo que se gastó fueron notas de un blindaje anterior ya validado.
 
 ## 7. Mediciones de gas
 
