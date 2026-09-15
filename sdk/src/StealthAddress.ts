@@ -1,52 +1,43 @@
 import { ethers } from "ethers";
 
 /**
- * Stealth Meta-Address según ERC-5564
+ * Módulo DireccionesSigilosas del diseño.
  *
- * 66 bytes = spending pubkey (33 comprimida) + viewing pubkey (33 comprimida),
- * en ese orden. Es el que fija el estándar, y respetarlo es lo que permite que
- * una herramienta de terceros interprete la metadirección correctamente.
+ * Exporta sus tres operaciones ---generarClaves, derivarSigilosa y
+ * compruebaPropiedad--- como deriveStealthKeys, generateStealthAddress y
+ * checkStealthAddress. El resto del archivo es interno.
  */
-export interface StealthMetaAddress {
-  spendingPublicKey: Uint8Array; // 33 bytes (compressed secp256k1)
-  viewingPublicKey: Uint8Array; // 33 bytes (compressed secp256k1)
+
+/** Metadirección ERC-5564 descompuesta: clave de gasto primero, como fija el estándar. */
+interface StealthMetaAddress {
+  spendingPublicKey: Uint8Array; // 33 bytes (secp256k1 comprimida)
+  viewingPublicKey: Uint8Array; // 33 bytes (secp256k1 comprimida)
 }
 
-/**
- * Par de claves para stealth addresses
- */
+/** Par de claves sigilosas. */
 export interface StealthKeyPair {
   privateKey: Uint8Array;
-  publicKey: Uint8Array; // 33 bytes compressed
+  publicKey: Uint8Array; // 33 bytes comprimida
 }
 
-/**
- * Genera un par de claves aleatorio
- */
-export function generateKeyPair(): StealthKeyPair {
-  const privateKey = ethers.randomBytes(32);
-  const signingKey = new ethers.SigningKey(privateKey);
-  const publicKey = ethers.getBytes(signingKey.compressedPublicKey);
-  return { privateKey, publicKey };
-}
-
-/**
- * Genera una stealth meta-address completa (viewing + spending keys)
- */
-export function generateStealthMetaAddress(): {
+/** ClavesSigilosas: los dos pares de un alias y la metadirección que los publica. */
+export interface StealthKeys {
   viewing: StealthKeyPair;
   spending: StealthKeyPair;
   metaAddress: Uint8Array;
-} {
-  const viewing = generateKeyPair();
-  const spending = generateKeyPair();
+}
 
-  // Concatenar según ERC-5564: spending pubkey (33) + viewing pubkey (33) = 66 bytes
-  const metaAddress = new Uint8Array(66);
-  metaAddress.set(spending.publicKey, 0);
-  metaAddress.set(viewing.publicKey, 33);
+/** AnuncioSigiloso: lo que el remitente publica junto al pago. */
+export interface StealthAnnouncement {
+  stealthAddress: string;
+  ephemeralPublicKey: Uint8Array;
+  viewTag: number;
+}
 
-  return { viewing, spending, metaAddress };
+/** Comprobación: si el pago es del receptor y, si aportó su clave de gasto, la clave sigilosa. */
+export interface StealthCheck {
+  isOurs: boolean;
+  stealthPrivateKey?: Uint8Array;
 }
 
 // Propósito propio para las rutas de derivación de claves sigilosas, distinto
@@ -56,7 +47,7 @@ const STEALTH_PURPOSE = 5564;
 /**
  * Normaliza un alias igual que el contrato: mayúsculas ASCII a minúsculas.
  */
-export function normalizeAlias(alias: string): string {
+function normalizeAlias(alias: string): string {
   return alias.replace(/[A-Z]/g, (c) => c.toLowerCase());
 }
 
@@ -87,10 +78,7 @@ function keyPairAt(mnemonic: string, path: string): StealthKeyPair {
  * llegue a la metadirección publicada. Aliases distintos obtienen metadirecciones
  * distintas, que por lo tanto no se vinculan entre sí.
  */
-export function deriveStealthKeys(
-  mnemonic: string,
-  alias: string
-): { viewing: StealthKeyPair; spending: StealthKeyPair; metaAddress: Uint8Array } {
+export function deriveStealthKeys(mnemonic: string, alias: string): StealthKeys {
   const base = `m/${STEALTH_PURPOSE}'/${aliasIndex(alias)}'`;
   const spending = keyPairAt(mnemonic, `${base}/0'`);
   const viewing = keyPairAt(mnemonic, `${base}/1'`);
@@ -105,7 +93,7 @@ export function deriveStealthKeys(
 /**
  * Parsea una stealth meta-address de 66 bytes
  */
-export function parseStealthMetaAddress(
+function parseStealthMetaAddress(
   metaAddress: Uint8Array | string
 ): StealthMetaAddress {
   const bytes =
@@ -134,11 +122,7 @@ export function parseStealthMetaAddress(
 export function generateStealthAddress(
   metaAddress: Uint8Array | string,
   ephemeralPrivateKey?: Uint8Array
-): {
-  stealthAddress: string;
-  ephemeralPublicKey: Uint8Array;
-  viewTag: number;
-} {
+): StealthAnnouncement {
   const { viewingPublicKey, spendingPublicKey } =
     parseStealthMetaAddress(metaAddress);
 
@@ -172,30 +156,29 @@ export function generateStealthAddress(
 }
 
 /**
- * Verifica si una stealth address nos pertenece (para el receptor)
+ * Comprueba si un anuncio sigiloso corresponde al receptor.
  *
- * @param stealthAddress - La dirección a verificar
- * @param ephemeralPublicKey - Clave pública efímera del remitente
- * @param viewingPrivateKey - Nuestra clave privada de visualización
- * @param spendingPublicKey - Nuestra clave pública de gasto
- * @param viewTag - View tag para optimización (opcional)
- * @param spendingPrivateKey - Nuestra clave privada de gasto (necesaria para derivar la clave de la stealth address)
+ * @param announcement - Dirección sigilosa, clave pública efímera y etiqueta de vista
+ * @param viewingPrivateKey - Clave privada de visualización del receptor
+ * @param spendingPublicKey - Clave pública de gasto del receptor
+ * @param spendingPrivateKey - Clave privada de gasto; si se aporta, se deriva la
+ *   clave sigilosa que permite disponer de los fondos
  */
 export function checkStealthAddress(
-  stealthAddress: string,
-  ephemeralPublicKey: Uint8Array,
+  announcement: StealthAnnouncement,
   viewingPrivateKey: Uint8Array,
   spendingPublicKey: Uint8Array,
-  viewTag?: number,
   spendingPrivateKey?: Uint8Array
-): { isOurs: boolean; stealthPrivateKey?: Uint8Array } {
+): StealthCheck {
+  const { stealthAddress, ephemeralPublicKey, viewTag } = announcement;
+
   // Shared secret: ECDH(viewing_private, ephemeral_public)
   const sharedSecret = computeSharedSecret(viewingPrivateKey, ephemeralPublicKey);
   const hashedSecret = ethers.keccak256(ethers.hexlify(sharedSecret));
   const hashedSecretBytes = ethers.getBytes(hashedSecret);
 
   // Verificar view tag primero (optimización: descarta 255/256 de los anuncios)
-  if (viewTag !== undefined && hashedSecretBytes[0] !== viewTag) {
+  if (hashedSecretBytes[0] !== viewTag) {
     return { isOurs: false };
   }
 

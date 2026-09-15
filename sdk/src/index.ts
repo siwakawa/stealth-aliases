@@ -1,18 +1,18 @@
 // Cliente para el contrato AliasRegistry
 export { AliasRegistryClient, DEPLOYMENTS } from "./AliasRegistryClient";
-export type { AliasInfo } from "./AliasRegistryClient";
 
 // Utilidades de stealth addresses
 export {
-  generateKeyPair,
-  generateStealthMetaAddress,
   deriveStealthKeys,
-  normalizeAlias,
-  parseStealthMetaAddress,
   generateStealthAddress,
   checkStealthAddress,
 } from "./StealthAddress";
-export type { StealthMetaAddress, StealthKeyPair } from "./StealthAddress";
+export type {
+  StealthKeyPair,
+  StealthKeys,
+  StealthAnnouncement,
+  StealthCheck,
+} from "./StealthAddress";
 
 // Canales de envío (estrategia) y operaciones de usuario (contexto)
 export { DirectChannel, PrivateChannel, createChannel } from "./SendChannel";

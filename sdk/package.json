@@ -7,10 +7,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "demo": "ts-node src/examples/demo.ts",
     "demo:railgun": "ts-node src/examples/railgun-demo.ts",
     "alias": "ts-node src/cli.ts",
-    "test": "ts-node src/examples/demo.ts"
+    "test": "cd ../contracts && npx hardhat test"
   },
   "dependencies": {
     "@railgun-community/shared-models": "^8.0.1",

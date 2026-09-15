@@ -13,7 +13,6 @@ import {
   loadWalletByID,
   getRailgunAddress,
   walletForID,
-  awaitWalletScan,
   setOnUTXOMerkletreeScanCallback,
   populateShield,
   getShieldPrivateKeySignatureMessage,
@@ -81,7 +80,7 @@ export interface RailgunConfig {
 /**
  * Información de wallet Railgun
  */
-export interface WalletInfo {
+interface WalletInfo {
   id: string;
   railgunAddress: string;
   mnemonic?: string;
@@ -268,9 +267,9 @@ export class RailgunService {
   }
 
   /**
-   * Crea una nueva wallet de Railgun
+   * Crea o importa una wallet de Railgun
    */
-  async createWallet(mnemonic?: string): Promise<WalletInfo> {
+  private async createWallet(mnemonic?: string): Promise<WalletInfo> {
     this.ensureInitialized();
 
     const walletMnemonic =
@@ -324,42 +323,40 @@ export class RailgunService {
   }
 
   /**
-   * Crea o carga una wallet según si ya existe en disco.
-   * Persiste el wallet ID en un archivo JSON para reutilizarlo.
+   * Carga la billetera que corresponde a una semilla y devuelve su dirección de
+   * recepción privada (operación obtenerBilletera del diseño).
+   *
+   * La primera vez la importa y guarda su identificador en disco, bajo un nombre
+   * derivado de la semilla, para no volver a recorrer el árbol en cada sesión.
    */
-  async getOrCreateWallet(
-    mnemonic: string,
-    label: string = "default"
-  ): Promise<WalletInfo> {
+  async getOrCreateWallet(mnemonic: string): Promise<string> {
     this.ensureInitialized();
 
-    const walletFile = path.join(this.config.dataDir, `wallet-${label}.json`);
+    const fileKey = ethers.keccak256(ethers.toUtf8Bytes(mnemonic)).slice(2, 18);
+    const walletFile = path.join(this.config.dataDir, `wallet-${fileKey}.json`);
 
-    // Si ya existe, cargar por ID
     if (fs.existsSync(walletFile)) {
       const saved = JSON.parse(fs.readFileSync(walletFile, "utf8"));
-      console.log(`Cargando wallet "${label}" (${saved.id.slice(0, 16)}...)...`);
+      console.log(`Cargando wallet (${saved.id.slice(0, 16)}...)...`);
       try {
-        return await this.loadWallet(saved.id);
+        return (await this.loadWallet(saved.id)).railgunAddress;
       } catch {
-        console.log("⚠ No se pudo cargar, recreando...");
+        console.log("⚠ No se pudo cargar, importando de nuevo...");
       }
     }
 
-    // Crear nueva y guardar
     const walletInfo = await this.createWallet(mnemonic);
     fs.writeFileSync(
       walletFile,
-      JSON.stringify({ id: walletInfo.id, label, railgunAddress: walletInfo.railgunAddress }, null, 2)
+      JSON.stringify({ id: walletInfo.id, railgunAddress: walletInfo.railgunAddress }, null, 2)
     );
-    console.log(`Wallet "${label}" guardada en ${walletFile}`);
-    return walletInfo;
+    return walletInfo.railgunAddress;
   }
 
   /**
    * Carga una wallet existente por ID
    */
-  async loadWallet(walletId: string): Promise<WalletInfo> {
+  private async loadWallet(walletId: string): Promise<WalletInfo> {
     this.ensureInitialized();
 
     const walletResponse = await loadWalletByID(
@@ -448,22 +445,6 @@ export class RailgunService {
     // cliente no la considera gastable hasta consultar su estado.
     await refreshReceivePOIsForWallet(this.getTxidVersion(), this.networkName, this.walletInfo.id);
     await refreshBalances(chain, [this.walletInfo.id]);
-  }
-
-  /**
-   * Espera a que el scan del merkletree termine para la wallet actual
-   */
-  async waitForScan(timeoutMs: number = 300_000): Promise<void> {
-    this.ensureInitialized();
-    if (!this.walletInfo) throw new Error("No hay wallet cargada");
-
-    const chain = this.getChain();
-    await Promise.race([
-      awaitWalletScan(this.walletInfo.id, chain),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Scan timeout")), timeoutMs)
-      ),
-    ]);
   }
 
   /**
@@ -1139,29 +1120,6 @@ export class RailgunService {
     console.log(`✓ Transferencia confirmada en bloque ${receipt?.blockNumber}`);
 
     return tx.hash;
-  }
-
-  /**
-   * Obtiene el contrato proxy de Railgun para esta red
-   */
-  getRailgunProxyContract(): string {
-    return NETWORK_CONFIG[this.networkName]?.proxyContract || "";
-  }
-
-  /**
-   * Obtiene información de la red configurada
-   */
-  getNetworkInfo(): {
-    name: SupportedNetwork;
-    chainId: number;
-    proxyContract: string;
-  } {
-    const config = NETWORK_CONFIG[this.networkName];
-    return {
-      name: this.config.networkName,
-      chainId: config?.chain?.id || 0,
-      proxyContract: config?.proxyContract || "",
-    };
   }
 
   // === Helpers privados ===

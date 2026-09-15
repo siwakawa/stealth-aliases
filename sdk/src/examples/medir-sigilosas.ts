@@ -10,10 +10,13 @@
  */
 
 import {
-  generateStealthMetaAddress,
+  deriveStealthKeys,
   generateStealthAddress,
   checkStealthAddress,
 } from "../StealthAddress";
+
+// Frase de prueba pública: solo sirve para medir, no custodia fondos.
+const MNEMONIC = "test test test test test test test test test test test junk";
 
 const REPETITIONS = Number(process.argv[2] || 200);
 const WARMUP = 20;
@@ -25,18 +28,16 @@ function average(fn: () => void): number {
   return Number(process.hrtime.bigint() - t0) / 1e6 / REPETITIONS;
 }
 
-const keys = generateStealthMetaAddress();
+const keys = deriveStealthKeys(MNEMONIC, "alice");
 const payment = generateStealthAddress(keys.metaAddress);
 
 const results = {
-  "Generación de metadirección": average(() => generateStealthMetaAddress()),
+  "Derivación de claves y metadirección": average(() => deriveStealthKeys(MNEMONIC, "alice")),
   "Verificación de dirección sigilosa": average(() =>
     checkStealthAddress(
-      payment.stealthAddress,
-      payment.ephemeralPublicKey,
+      payment,
       keys.viewing.privateKey,
       keys.spending.publicKey,
-      payment.viewTag,
       keys.spending.privateKey
     )
   ),

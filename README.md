@@ -94,7 +94,7 @@ import { AliasApp, AliasRegistryClient, RailgunService, createChannel } from "@t
 
 const railgun = new RailgunService({ networkName: "Polygon", rpcUrl, dataDir });
 await railgun.initialize();
-await railgun.getOrCreateWallet(mnemonic, "alice");
+await railgun.getOrCreateWallet(mnemonic);
 
 // La vía se elige una sola vez: "direct" firma con la billetera pública,
 // "private" entrega las operaciones a un retransmisor.

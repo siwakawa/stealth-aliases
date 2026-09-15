@@ -5,7 +5,6 @@ import {
   checkStealthAddress,
   deriveStealthKeys,
   generateStealthAddress,
-  normalizeAlias,
 } from "../../sdk/src/StealthAddress";
 import reference from "./fixtures/erc5564-vectors.json";
 
@@ -31,12 +30,15 @@ describe("Direcciones sigilosas", function () {
 
       it(`reconoce el pago y obtiene la misma clave privada sigilosa (vector ${i + 1})`, function () {
         const meta = ethers.getBytes(v.stealthMetaAddress);
+        const announcement = {
+          stealthAddress: v.stealthAddress,
+          ephemeralPublicKey: ethers.getBytes(v.ephemeralPublicKey),
+          viewTag: Number(v.viewTag),
+        };
         const result = checkStealthAddress(
-          v.stealthAddress,
-          ethers.getBytes(v.ephemeralPublicKey),
+          announcement,
           ethers.getBytes(v.viewingPrivateKey),
           meta.slice(0, 33),
-          Number(v.viewTag),
           ethers.getBytes(v.spendingPrivateKey)
         );
         expect(result.isOurs).to.equal(true);
@@ -60,7 +62,6 @@ describe("Direcciones sigilosas", function () {
     });
 
     it("el alias se normaliza como en el contrato", function () {
-      expect(normalizeAlias("Alice_01")).to.equal("alice_01");
       const upper = deriveStealthKeys(mnemonic, "ALICE");
       const lower = deriveStealthKeys(mnemonic, "alice");
       expect(ethers.hexlify(upper.metaAddress)).to.equal(ethers.hexlify(lower.metaAddress));
@@ -79,11 +80,9 @@ describe("Direcciones sigilosas", function () {
       // El receptor reconstruye sus claves a partir de la frase, sin estado guardado.
       const recovered = deriveStealthKeys(mnemonic, "alice");
       const result = checkStealthAddress(
-        payment.stealthAddress,
-        payment.ephemeralPublicKey,
+        payment,
         recovered.viewing.privateKey,
         recovered.spending.publicKey,
-        payment.viewTag,
         recovered.spending.privateKey
       );
 

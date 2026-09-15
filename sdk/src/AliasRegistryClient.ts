@@ -12,13 +12,11 @@ const DEPLOYMENT_BLOCKS: Record<number, number> = {
   137: 93_745_500,
 };
 
-export interface AliasInfo {
-  alias: string;
-  stealthMetaAddress: string;
-  railgunAddress: string;
-  isRegistered: boolean;
-}
-
+/**
+ * Módulo Resolución del diseño: prepararRegistro, resolver, resolverPrivada,
+ * registrado y aliasesDe se realizan como populateRegister, resolve,
+ * resolveRailgun, isRegistered y aliasesPointingTo.
+ */
 export class AliasRegistryClient {
   private contract: Contract;
   private provider: Provider;
@@ -101,28 +99,6 @@ export class AliasRegistryClient {
   }
 
   /**
-   * Obtiene información completa de un alias
-   */
-  async getAliasInfo(alias: string): Promise<AliasInfo> {
-    const isRegistered = await this.isRegistered(alias);
-    let stealthMetaAddress = "0x";
-    let railgunAddress = "";
-
-    if (isRegistered) {
-      const data = await this.resolve(alias);
-      stealthMetaAddress = data.stealthMetaAddress;
-      railgunAddress = data.railgunAddress;
-    }
-
-    return {
-      alias,
-      stealthMetaAddress,
-      railgunAddress,
-      isRegistered,
-    };
-  }
-
-  /**
    * Devuelve los aliases registrados que reciben en una dirección Railgun.
    *
    * El contrato no guarda el mapeo inverso, de modo que se reconstruye a partir
@@ -138,19 +114,5 @@ export class AliasRegistryClient {
       .map((e) => (e as ethers.EventLog).args)
       .filter((args) => args.railgunAddress === railgunAddress)
       .map((args) => args.alias_ as string);
-  }
-
-  /**
-   * Calcula el hash de un alias (para lookups directos)
-   */
-  async getAliasHash(alias: string): Promise<string> {
-    return this.contract.getAliasHash(alias);
-  }
-
-  /**
-   * Obtiene la dirección del contrato
-   */
-  getContractAddress(): string {
-    return this.contract.target as string;
   }
 }

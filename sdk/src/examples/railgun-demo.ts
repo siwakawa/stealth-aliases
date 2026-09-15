@@ -29,7 +29,7 @@ import { config } from "dotenv";
 import * as path from "path";
 
 import { AliasApp } from "../AliasApp";
-import { AliasRegistryClient } from "../AliasRegistryClient";
+import { AliasRegistryClient, DEPLOYMENTS } from "../AliasRegistryClient";
 import { RailgunService } from "../railgun/RailgunService";
 import { createChannel, type Via } from "../SendChannel";
 
@@ -89,7 +89,7 @@ async function waitForSpendableBalance(
         `se necesitan ${ethers.formatUnits(minimum, 6)}. Refrescando...`
     );
     await timed("refresco de balances y pruebas POI", () =>
-      railgun.getOrCreateWallet(mnemonic, label)
+      railgun.getOrCreateWallet(mnemonic)
     );
     spendable = await railgun.getBalance(token, true);
   }
@@ -156,7 +156,7 @@ async function main() {
   // transferencia con los dos aliases desde un explorador de bloques.
   const signerB = new ethers.Wallet(PRIVATE_KEY_B, provider);
   console.log(`Wallet pública de ${ALIAS_B}: ${signerB.address}`);
-  console.log(`AliasRegistry: ${registry.getContractAddress()}\n`);
+  console.log(`AliasRegistry: ${DEPLOYMENTS[137]}\n`);
 
   // Railgun service
   const railgun = new RailgunService({
@@ -186,12 +186,12 @@ async function main() {
     console.log("━━━ PARTE 2: Wallets Railgun + registro de aliases ━━━\n");
 
     // Wallet Railgun de la emisora
-    const walletA = await railgun.getOrCreateWallet(MNEMONIC_A, ALIAS_A);
-    console.log(`  ${ALIAS_A} Railgun: ${walletA.railgunAddress.slice(0, 40)}...`);
+    const walletA = await railgun.getOrCreateWallet(MNEMONIC_A);
+    console.log(`  ${ALIAS_A} Railgun: ${walletA.slice(0, 40)}...`);
 
     // Wallet Railgun del receptor: mnemónico propio, distinto del de la emisora
-    const walletB = await railgun.getOrCreateWallet(MNEMONIC_B, ALIAS_B);
-    console.log(`  ${ALIAS_B} Railgun: ${walletB.railgunAddress.slice(0, 40)}...\n`);
+    const walletB = await railgun.getOrCreateWallet(MNEMONIC_B);
+    console.log(`  ${ALIAS_B} Railgun: ${walletB.slice(0, 40)}...\n`);
 
     // Balance privado inicial del receptor (su wallet es la activa, recién creada).
     // Se guarda para verificar la recepción al final del flujo.
@@ -202,12 +202,12 @@ async function main() {
     // comportamiento esperado, y su participación es visible igual porque paga el gas.
     if (!(await registry.isRegistered(ALIAS_A))) {
       console.log(`Registrando @${ALIAS_A} (vía ${via})...`);
-      await railgun.getOrCreateWallet(MNEMONIC_A, ALIAS_A);
+      await railgun.getOrCreateWallet(MNEMONIC_A);
       const hash = await appFor(signer, MNEMONIC_A).registerAlias(ALIAS_A);
       console.log(`  ✓ @${ALIAS_A} registrada (tx: ${hash})`);
     } else {
       const registeredAddressA = await registry.resolveRailgun(ALIAS_A);
-      if (registeredAddressA !== walletA.railgunAddress) {
+      if (registeredAddressA !== walletA) {
         throw new Error(
           `@${ALIAS_A} ya está tomada y apunta a otra dirección Railgun. ` +
             `Elegí otro alias con ALIAS_A en el .env.`
@@ -221,12 +221,12 @@ async function main() {
     // podría vincular la transferencia con los dos aliases.
     if (!(await registry.isRegistered(ALIAS_B))) {
       console.log(`Registrando @${ALIAS_B} (vía ${via})...`);
-      await railgun.getOrCreateWallet(MNEMONIC_B, ALIAS_B);
+      await railgun.getOrCreateWallet(MNEMONIC_B);
       const hash = await appFor(signerB, MNEMONIC_B).registerAlias(ALIAS_B);
       console.log(`  ✓ @${ALIAS_B} registrado (tx: ${hash})`);
     } else {
       const registeredAddressB = await registry.resolveRailgun(ALIAS_B);
-      if (registeredAddressB !== walletB.railgunAddress) {
+      if (registeredAddressB !== walletB) {
         throw new Error(
           `@${ALIAS_B} ya está tomado y apunta a otra dirección Railgun. ` +
             `Elegí otro alias con ALIAS_B en el .env.`
@@ -237,15 +237,13 @@ async function main() {
 
     // Verificar resolución
     console.log("\nVerificando aliases on-chain:");
-    const infoA = await registry.getAliasInfo(ALIAS_A);
-    console.log(`  @${ALIAS_A} → ${infoA.railgunAddress.slice(0, 30)}...`);
-    const infoB = await registry.getAliasInfo(ALIAS_B);
-    console.log(`  @${ALIAS_B} → ${infoB.railgunAddress.slice(0, 30)}...`);
+    console.log(`  @${ALIAS_A} → ${(await registry.resolveRailgun(ALIAS_A)).slice(0, 30)}...`);
+    console.log(`  @${ALIAS_B} → ${(await registry.resolveRailgun(ALIAS_B)).slice(0, 30)}...`);
 
     // Balances iniciales
     // Volver a la wallet de la emisora: crear la del receptor la dejó como wallet
     // activa, así que sin este reload el balance de abajo sería el del receptor.
-    await railgun.getOrCreateWallet(MNEMONIC_A, ALIAS_A);
+    await railgun.getOrCreateWallet(MNEMONIC_A);
     const balanceA = await railgun.getBalance(USDC_ADDRESS);
     console.log(`\n  Balance privado de ${ALIAS_A}: ${ethers.formatUnits(balanceA, 6)} USDC`);
 
@@ -256,7 +254,7 @@ async function main() {
       console.log(`\n━━━ PARTE 3: ${ALIAS_A} blinda USDC en Railgun ━━━\n`);
 
       // Recargar la wallet de la emisora (la del receptor sobreescribió walletInfo)
-      await railgun.getOrCreateWallet(MNEMONIC_A, ALIAS_A);
+      await railgun.getOrCreateWallet(MNEMONIC_A);
 
       const erc20Abi = [
         "function balanceOf(address) view returns (uint256)",
@@ -278,13 +276,8 @@ async function main() {
 
         // Esperar a que el merkletree scan detecte el UTXO del shield
         console.log("  Esperando scan de merkletree (max 5 min)...");
-        try {
-          await railgun.waitForScan(300_000);
-          console.log("  ✓ Scan completado");
-        } catch {
-          console.log("  ⚠ Scan timeout, reintentando...");
-          await railgun.refreshWalletBalances();
-        }
+        // El escaneo incremental detecta la nota del blindaje.
+        await railgun.refreshWalletBalances();
         const newBalance = await railgun.getBalance(USDC_ADDRESS);
         const spendable = await railgun.getBalance(USDC_ADDRESS, true);
         console.log(`  Balance privado de ${ALIAS_A}: ${ethers.formatUnits(newBalance, 6)} USDC`);
@@ -307,7 +300,7 @@ async function main() {
       console.log(`\n━━━ PARTE 4: ${ALIAS_A} envía a @${ALIAS_B} (transferencia privada) ━━━\n`);
 
       // Asegurar que estamos con la wallet de la emisora
-      await railgun.getOrCreateWallet(MNEMONIC_A, ALIAS_A);
+      await railgun.getOrCreateWallet(MNEMONIC_A);
 
       // Sincronización incremental medida por separado: refrescar balances
       // recorre el árbol de Merkle sin tocar las pruebas POI, de modo que el
@@ -361,7 +354,7 @@ async function main() {
 
         // 5. El receptor verifica su balance: cargar su wallet y confirmar la recepción
         console.log(`\n  Verificando recepción en la wallet de ${ALIAS_B}...`);
-        await railgun.getOrCreateWallet(MNEMONIC_B, ALIAS_B); // recarga + refreshBalances
+        await railgun.getOrCreateWallet(MNEMONIC_B); // recarga + refreshBalances
         const finalB = await railgun.getBalance(USDC_ADDRESS);
         const deltaB = finalB - initialBalanceB;
         console.log(

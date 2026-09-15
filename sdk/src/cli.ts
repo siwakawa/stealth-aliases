@@ -81,7 +81,7 @@ async function main() {
 
   try {
     await railgun.initialize();
-    await railgun.getOrCreateWallet(mnemonic, walletName);
+    await railgun.getOrCreateWallet(mnemonic);
 
     switch (command) {
       case "register":
